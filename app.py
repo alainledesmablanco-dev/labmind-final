@@ -28,16 +28,15 @@ def leer_pdf(archivo):
 # --- BARRA LATERAL (CONFIGURACIÓN) ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=70)
-    st.title("LabMind 5.2")
-    st.caption("Especialista en Heridas (Protocolo Seguro)")
+    st.title("LabMind 5.3")
+    st.caption("Versión Flash (Rápida)")
     
     api_key = st.text_input("🔑 Google API Key:", type="password")
     
     st.divider()
     
-    # SECCIÓN DE PROTOCOLOS (EVIDENCIA)
     st.write("📚 **Validación con Evidencia**")
-    protocolo_pdf = st.file_uploader("Sube tu Protocolo de Heridas/Unidad (PDF)", type="pdf")
+    protocolo_pdf = st.file_uploader("Sube Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
         texto_protocolo = leer_pdf(protocolo_pdf)
@@ -46,7 +45,7 @@ with st.sidebar:
         st.info("ℹ️ Sin PDF, usaré Guías GNEAUPP/EPUAP.")
 
     st.divider()
-    contexto = st.selectbox("Contexto Paciente:", ["Hospitalización", "Urgencias", "Atención Primaria / Domicilio", "UCI", "Residencia"])
+    contexto = st.selectbox("Contexto Paciente:", ["Hospitalización", "Urgencias", "Atención Primaria", "UCI", "Residencia"])
 
 # --- CUERPO PRINCIPAL ---
 st.title("🩺 Unidad de Análisis Clínico")
@@ -60,18 +59,13 @@ with tab_analisis:
     
     with col1:
         st.subheader("1. Configuración del Caso")
-        
-        # SELECTOR DE MODO
         modo = st.radio("¿Qué analizamos?", 
                         ["🩹 Heridas & Úlceras (UPP)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC", "📝 Informe Médico"])
         
         st.markdown("---")
-        
-        # SUBIDA DE IMÁGENES
         archivo_actual = st.file_uploader("📸 FOTO ACTUAL (Obligatoria)", type=['jpg', 'png', 'jpeg', 'pdf'])
-        archivo_previo = st.file_uploader("FOTO PREVIA (Opcional - Evolución)", type=['jpg', 'png', 'jpeg'])
+        archivo_previo = st.file_uploader("FOTO PREVIA (Opcional)", type=['jpg', 'png', 'jpeg'])
         
-        # INPUT DE CONTEXTO / TRATAMIENTO ACTUAL
         st.markdown("---")
         info_extra = st.text_area("✍️ Localización y Notas:", 
                                   placeholder="Ej: Talón derecho. Placa negra seca. ¿Le pongo hidrogel?",
@@ -84,12 +78,12 @@ with tab_analisis:
             if not api_key:
                 st.error("❌ Falta la API Key")
             else:
-                with st.spinner("🔍 Analizando tejidos, localización y aplicando protocolos de seguridad..."):
+                with st.spinner("🔍 Analizando con IA Flash..."):
                     try:
                         genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel("gemini-1.5-pro") 
+                        # CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash' que es el modelo estable y gratuito
+                        model = genai.GenerativeModel("gemini-1.5-flash") 
                         
-                        # PREPARACIÓN DE IMÁGENES
                         contenido = []
                         prompt_archivos = ""
                         
@@ -101,68 +95,49 @@ with tab_analisis:
 
                         if archivo_previo:
                             contenido.append(Image.open(archivo_previo))
-                            prompt_archivos += "\n[IMAGEN 2: ESTADO PREVIO - COMPARAR EVOLUCIÓN]"
+                            prompt_archivos += "\n[IMAGEN 2: ESTADO PREVIO]"
 
-                        # PREPARACIÓN DEL CONOCIMIENTO (PDF)
                         prompt_protocolo = ""
                         if texto_protocolo:
                             prompt_protocolo = f"⚠️ IMPORTANTE: JUSTIFICA TUS RESPUESTAS USANDO ESTE PROTOCOLO:\n{texto_protocolo[:30000]}\nCita la página si es posible."
                         else:
                             prompt_protocolo = "⚠️ IMPORTANTE: JUSTIFICA TUS RESPUESTAS USANDO GUÍAS INTERNACIONALES (GNEAUPP, EPUAP)."
 
-                        # --- EL CEREBRO DE LA HERIDA (CON REGLA DEL TALÓN) ---
                         full_prompt = f"""
                         Actúa como Enfermera Clínica Especialista en Heridas (Estomaterapeuta).
                         CONTEXTO: {contexto}. MODO: {modo}.
-                        NOTAS USUARIO (Localización/Dudas): "{info_extra}"
+                        NOTAS USUARIO: "{info_extra}"
                         
                         {prompt_archivos}
                         {prompt_protocolo}
                         
-                        TAREA ESPECÍFICA SEGÚN MODO:
+                        TAREA ESPECÍFICA:
                         
-                        SI ES 🩹 HERIDAS & ÚLCERAS:
-                        1. DIAGNÓSTICO:
-                           - Tipo y Estadio.
-                           - **LOCALIZACIÓN:** Intenta inferirla por la imagen o las notas (¿Es Sacro? ¿Es Talón?).
+                        SI ES 🩹 HERIDAS:
+                        1. DIAGNÓSTICO (Tipo, Estadio, Localización).
+                        2. ANÁLISIS TISULAR (TIME): % Granulación / Esfacelos / Necrosis.
+                        3. REGLA SEGURIDAD TALÓN: Si es Talón + Necrosis Seca -> NO DESBRIDAR, MANTENER SECO.
+                        4. PLAN DE CURAS: Producto exacto y frecuencia.
                         
-                        2. ANÁLISIS TISULAR (TIME):
-                           - % Granulación / % Esfacelos / % Necrosis.
-                           - Signos de Infección (Eritema, calor, exudado purulento).
-                        
-                        3. REGLA DE SEGURIDAD (TALÓN vs RESTO):
-                           - **SI ES TALÓN + NECROSIS SECA (Sin infección):** ¡ALERTA ROJA! NO RECOMENDAR DESBRIDAMIENTO NI HUMEDAD (Hidrogeles).
-                             La indicación correcta es: MANTENER SECA, PINTAR CON POVIDONA/BETADINE Y PROTEGER DE PRESIÓN (Flotación).
-                           - **SI ES OTRA ZONA o HAY INFECCIÓN:**
-                             Entonces sí, sugiere desbridamiento (Enzimático/Autolítico).
-                        
-                        4. VALIDACIÓN TRATAMIENTO: 
-                           - Compara lo que hace el usuario con la regla de seguridad anterior.
-                        
-                        5. PLAN DE CURAS:
-                           - Producto exacto.
-                           - Frecuencia de cura.
+                        SI ES OTRO MODO: Analítica, ECG, Rx... Analiza valores críticos.
                         
                         FORMATO DE SALIDA (Markdown):
-                        - 🩺 DIAGNÓSTICO Y TEJIDOS
-                        - 🚨 REGLA DE SEGURIDAD APLICADA (Explica por qué)
+                        - 🩺 DIAGNÓSTICO
+                        - 🚨 SEGURIDAD / ALERTAS
                         - ✅/❌ VALIDACIÓN TRATAMIENTO
-                        - 📝 PLAN DE CUIDADOS (Con Citas)
+                        - 📝 PLAN DE CUIDADOS
                         """
                         
-                        # GENERAR
                         response = model.generate_content([full_prompt, *contenido])
                         st.markdown(response.text)
-                        
-                        # GUARDAR EN CHAT
                         st.session_state.mensajes.append({"role": "assistant", "content": f"**Análisis {modo}:**\n{response.text}"})
                         
                     except Exception as e:
                         st.error(f"Error: {e}")
 
-# --- PESTAÑA 2: CHAT CLÍNICO ---
+# --- PESTAÑA 2: CHAT ---
 with tab_chat:
-    st.info("💬 Habla con la IA sobre el caso.")
+    st.info("💬 Habla con la IA.")
     for msg in st.session_state.mensajes:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -176,6 +151,6 @@ with tab_chat:
                     genai.configure(api_key=api_key)
                     model = genai.GenerativeModel("gemini-1.5-flash")
                     historial = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.mensajes[-6:]])
-                    response = model.generate_content(f"Actúa como Enfermera Experta. Historial: {historial}\nPregunta Usuario: {prompt}\nUsa el protocolo PDF si existe.")
+                    response = model.generate_content(f"Actúa como Enfermera Experta. Historial: {historial}\nPregunta Usuario: {prompt}")
                     st.markdown(response.text)
                     st.session_state.mensajes.append({"role": "assistant", "content": response.text})
