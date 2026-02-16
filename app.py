@@ -4,130 +4,159 @@ from PIL import Image
 import pypdf
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind Uncensored", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind Privacy", page_icon="🛡️", layout="wide")
 
 # --- ESTILOS ---
 st.markdown("""
 <style>
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; }
-    .reportview-container { background: #f0f2f6; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
+    .esquema-rapido { background-color: #e8f4ff; padding: 15px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
+    h3 { color: #004a99; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=80)
-    st.title("LabMind Libre")
-    st.caption("🔓 Sin filtros de seguridad")
+    st.title("LabMind 6.1")
+    st.caption("🛡️ Privacidad + Heridas Pro")
     
-    # 1. API KEY
-    api_key = st.text_input("🔑 Tu API Key:", type="password")
+    api_key = st.text_input("🔑 API Key:", type="password")
     
-    # 2. SELECTOR DE MODELOS
-    modelo_elegido = "models/gemini-1.5-flash" # Valor por defecto seguro
-    
-    if api_key:
-        try:
-            genai.configure(api_key=api_key)
-            # Obtenemos la lista real de modelos que tu llave permite
-            lista_modelos = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    lista_modelos.append(m.name)
-            
-            st.success(f"✅ Llave válida. {len(lista_modelos)} modelos disponibles.")
-            
-            # EL MENÚ DESPLEGABLE
-            modelo_elegido = st.selectbox("🧠 ELIGE CEREBRO:", lista_modelos, index=0)
-            st.caption("Recomendado: gemini-1.5-flash o gemini-2.0-flash (No dan error de cuota)")
-            
-        except Exception as e:
-            st.error("❌ Clave inválida o error de conexión.")
-
     st.divider()
-    
-    # 3. PROTOCOLO
-    protocolo_pdf = st.file_uploader("Sube Protocolo (PDF)", type="pdf")
+    st.write("📚 **Evidencia / Protocolo**")
+    protocolo_pdf = st.file_uploader("Sube tu guía (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
         try:
             pdf_reader = pypdf.PdfReader(protocolo_pdf)
             for page in pdf_reader.pages: texto_protocolo += page.extract_text() or ""
-            st.success("✅ Protocolo activo")
+            st.success("✅ Protocolo memorizado.")
         except: st.error("Error PDF")
 
-    contexto = st.selectbox("Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio"])
+    contexto = st.selectbox("Contexto Paciente:", ["Hospitalización", "Atención Primaria/Domicilio", "UCI", "Residencia"])
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 Unidad Clínica (Modo Selector)")
+st.title("🩺 Unidad Clínica (Datos Anonimizados)")
 
-col1, col2 = st.columns([1, 2])
+col1, col2 = st.columns([1.2, 2])
 
 with col1:
-    modo = st.radio("Modo:", ["🩹 Heridas (UPP)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC"])
-    archivo = st.file_uploader("Subir Caso:", type=['jpg', 'png', 'jpeg', 'pdf'])
-    notas = st.text_area("Notas / Dudas:", height=100)
+    st.subheader("1. Datos del Caso")
+    modo = st.radio("Selecciona Modo:", ["🩹 Heridas (UPP/Evolución)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC"])
+    st.markdown("---")
+    
+    # --- LÓGICA DE ARCHIVOS ---
+    archivo_actual = None
+    archivo_previo = None
+    archivo_gen = None 
+
+    if modo == "🩹 Heridas (UPP/Evolución)":
+        st.info("📸 Modo Evolutivo: Sube foto actual y previa.")
+        archivo_actual = st.file_uploader("1️⃣ FOTO ACTUAL (Obligatoria)", type=['jpg', 'png', 'jpeg'])
+        archivo_previo = st.file_uploader("2️⃣ FOTO PREVIA (Opcional)", type=['jpg', 'png', 'jpeg'])
+    else:
+        archivo_gen = st.file_uploader("Subir Documento/Foto:", type=['jpg', 'png', 'jpeg', 'pdf'])
+
+    st.markdown("---")
+    notas = st.text_area("✍️ Notas:", placeholder="Ej: Diabético tipo 2...", height=100)
 
 with col2:
-    if archivo and st.button("🚀 ANALIZAR (SIN FILTROS)", type="primary"):
+    st.subheader("2. Análisis Estructurado IA")
+    
+    # Comprobar si hay archivos para activar botón
+    listo = False
+    if modo == "🩹 Heridas (UPP/Evolución)" and archivo_actual: listo = True
+    elif modo != "🩹 Heridas (UPP/Evolución)" and archivo_gen: listo = True
+
+    if listo and st.button("🚀 ANALIZAR (ANÓNIMO)", type="primary"):
         if not api_key:
-            st.warning("⚠️ Falta API Key en la izquierda.")
+            st.warning("⚠️ Falta API Key.")
         else:
-            with st.spinner(f"Analizando con {modelo_elegido} y filtros desactivados..."):
+            with st.spinner("🧠 Analizando, anonimizando datos y consultando evidencia..."):
                 try:
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel(modelo_elegido)
+                    # Usamos el modelo potente
+                    model = genai.GenerativeModel("models/gemini-3-flash-preview")
                     
-                    # --- AQUÍ ESTÁ LA MAGIA ANTI-CENSURA ---
-                    # Configuramos todos los filtros en BLOCK_NONE (Permitir todo)
-                    configuracion_seguridad = [
-                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                    ]
+                    # Seguridad OFF para ver heridas
+                    safety_settings = [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
                     
                     # Preparar contenido
                     contenido = []
-                    prompt_extra = ""
+                    prompt_imgs_text = ""
                     
-                    if archivo.type == "application/pdf":
-                         if not texto_protocolo: # Si es el archivo principal
-                            pdf_reader = pypdf.PdfReader(archivo)
-                            text = ""
-                            for page in pdf_reader.pages: text += page.extract_text()
-                            prompt_extra = f"PDF ADJUNTO:\n{text}"
-                    else:
-                        contenido.append(Image.open(archivo))
-                        prompt_extra = "Analiza esta imagen clínica detalladamente."
+                    if modo == "🩹 Heridas (UPP/Evolución)":
+                        contenido.append(Image.open(archivo_actual))
+                        prompt_imgs_text = "IMAGEN 1: ESTADO ACTUAL.\n"
+                        if archivo_previo:
+                            contenido.append(Image.open(archivo_previo))
+                            prompt_imgs_text += "IMAGEN 2: ESTADO PREVIO (Comparar evolución).\n"
+                            
+                    elif archivo_gen: 
+                        if archivo_gen.type == "application/pdf":
+                             if not texto_protocolo: # Solo leer si no es protocolo
+                                pdf_reader = pypdf.PdfReader(archivo_gen)
+                                text = ""
+                                for page in pdf_reader.pages: text += page.extract_text()
+                                prompt_imgs_text = f"CONTENIDO DEL PDF:\n{text}"
+                        else:
+                            contenido.append(Image.open(archivo_gen))
+                            prompt_imgs_text = "Analiza esta imagen clínica."
                     
-                    # Prompt
+                    # --- PROMPT CON ESCUDO DE PRIVACIDAD ---
                     full_prompt = f"""
-                    Actúa como Enfermera Experta. Contexto: {contexto}. Modo: {modo}.
-                    Notas Usuario: {notas}.
+                    Actúa como Enfermera Clínica Especialista (APN).
+                    CONTEXTO: {contexto}. MODO: {modo}.
+                    NOTAS: "{notas}"
+
+                    {prompt_imgs_text}
+                    {f"USA ESTE PROTOCOLO: {texto_protocolo[:20000]}" if texto_protocolo else "USA GUÍAS GNEAUPP/EPUAP."}
+
+                    ⚠️ REGLA DE ORO DE PRIVACIDAD (GDPR):
+                    1. ESTÁ PROHIBIDO ESCRIBIR EL NOMBRE REAL DEL PACIENTE.
+                    2. Si detectas un nombre en el documento (Ej: "Alain...", "María..."), IGNÓRALO.
+                    3. Refiérete al paciente ÚNICAMENTE como: "Paciente [Varón/Mujer] de [Edad] años".
+
+                    ***FORMATO DE SALIDA (2 PARTES)***:
+                    Usa una línea separadora "---" entre las dos partes.
+
+                    ---
+                    ### ⚡ RESUMEN RÁPIDO
+                    (Formato lista breve con iconos)
+                    * **👤 PACIENTE:** [Solo Edad y Sexo detectados].
+                    * **👁️ DIAGNÓSTICO:** [Lo que ves principal].
+                    * **🩹 ACCIÓN INMEDIATA:** [Producto/Acción clave].
+                    * **🔄 EVOLUCIÓN:** [Mejora/Empeora/Estable/No valorable].
+                    ---
                     
-                    {prompt_extra}
-                    {f"USA ESTE PROTOCOLO: {texto_protocolo[:10000]}" if texto_protocolo else ""}
-                    
-                    IMPORTANTE: Es una consulta médica profesional. Describe hallazgos objetivos (tejidos, sangre, heridas) con precisión técnica.
-                    
-                    TAREA: Diagnóstico, Alertas y Plan de Cuidados.
+                    ### 📝 ANÁLISIS DETALLADO Y EVIDENCIA
+                    1. **Valoración Completa:**
+                       - Si es Herida: TIME (Tejido, Infección, Bordes, Exudado).
+                       - Si es Analítica: Valores fuera de rango y su significado clínico.
+                    2. **Comparativa Evolutiva** (si hay datos previos).
+                    3. **PLAN DE CUIDADOS (Justificado):**
+                       - Pasos exactos.
+                       - **CITA LA EVIDENCIA** en cada recomendación. Ej: "Usar Plata [Fuente: Guía GNEAUPP]".
                     """
                     
-                    # Llamada con Safety Settings
-                    response = model.generate_content(
-                        [full_prompt, *contenido],
-                        safety_settings=configuracion_seguridad
-                    )
+                    # Llamada
+                    response = model.generate_content([full_prompt, *contenido], safety_settings=safety_settings)
                     
-                    st.markdown(response.text)
+                    # Renderizado bonito
+                    texto = response.text
+                    partes = texto.split("---")
+                    
+                    if len(partes) >= 3:
+                        st.markdown(f'<div class="esquema-rapido">{partes[1]}</div>', unsafe_allow_html=True)
+                        st.markdown(partes[2])
+                    else:
+                        st.markdown(texto)
+                        
+                    st.balloons()
                     
                 except Exception as e:
                     st.error("❌ Error:")
                     st.write(e)
-                    # Explicación de errores comunes
-                    err_msg = str(e)
-                    if "429" in err_msg:
-                        st.warning("💡 Has elegido un modelo muy potente (Pro/Deep) y Google te ha frenado. Elige un modelo 'Flash' en la lista.")
-                    elif "block" in err_msg.lower():
-                        st.warning("🛡️ Incluso sin filtros, Google ha bloqueado la imagen. Intenta recortarla un poco.")
+    elif not listo and st.button("🚀 ANALIZAR (ANÓNIMO)"):
+        st.warning("⚠️ Sube el archivo primero.")
