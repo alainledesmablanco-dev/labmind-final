@@ -4,7 +4,7 @@ from PIL import Image
 import pypdf
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="LabMind Wound Care", page_icon="🩹", layout="wide")
+st.set_page_config(page_title="LabMind Clásico", page_icon="🛡️", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -25,132 +25,134 @@ def leer_pdf(archivo):
         texto += page.extract_text()
     return texto
 
-# --- BARRA LATERAL (CONFIGURACIÓN) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=70)
-    st.title("LabMind 5.3")
-    st.caption("Versión Flash (Rápida)")
+    st.title("LabMind v5.4")
+    st.caption("Modo Compatibilidad (Sin errores)")
     
     api_key = st.text_input("🔑 Google API Key:", type="password")
     
     st.divider()
     
-    st.write("📚 **Validación con Evidencia**")
+    st.write("📚 **Evidencia (Opcional)**")
     protocolo_pdf = st.file_uploader("Sube Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
         texto_protocolo = leer_pdf(protocolo_pdf)
-        st.success("✅ Protocolo aprendido.")
-    else:
-        st.info("ℹ️ Sin PDF, usaré Guías GNEAUPP/EPUAP.")
+        st.success("✅ Protocolo cargado.")
 
     st.divider()
-    contexto = st.selectbox("Contexto Paciente:", ["Hospitalización", "Urgencias", "Atención Primaria", "UCI", "Residencia"])
+    contexto = st.selectbox("Contexto:", ["Hospitalización", "Urgencias", "UCI", "Residencia", "Domicilio"])
 
 # --- CUERPO PRINCIPAL ---
 st.title("🩺 Unidad de Análisis Clínico")
 
-# PESTAÑAS
-tab_analisis, tab_chat = st.tabs(["👁️ Análisis & Curas", "💬 Chat / Segunda Opinión"])
+tab_analisis, tab_chat = st.tabs(["👁️ Escáner Visual", "💬 Chat Clínico"])
 
-# --- PESTAÑA 1: EL ESCÁNER VISUAL ---
+# --- PESTAÑA 1: ANÁLISIS ---
 with tab_analisis:
     col1, col2 = st.columns([1.5, 2])
     
     with col1:
-        st.subheader("1. Configuración del Caso")
-        modo = st.radio("¿Qué analizamos?", 
-                        ["🩹 Heridas & Úlceras (UPP)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC", "📝 Informe Médico"])
-        
+        st.subheader("1. Caso")
+        modo = st.radio("Tipo:", ["🩹 Heridas (UPP)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC", "📝 Informe"])
         st.markdown("---")
-        archivo_actual = st.file_uploader("📸 FOTO ACTUAL (Obligatoria)", type=['jpg', 'png', 'jpeg', 'pdf'])
-        archivo_previo = st.file_uploader("FOTO PREVIA (Opcional)", type=['jpg', 'png', 'jpeg'])
-        
+        archivo_actual = st.file_uploader("📸 FOTO (Obligatoria)", type=['jpg', 'png', 'jpeg', 'pdf'])
         st.markdown("---")
-        info_extra = st.text_area("✍️ Localización y Notas:", 
-                                  placeholder="Ej: Talón derecho. Placa negra seca. ¿Le pongo hidrogel?",
-                                  height=100)
+        info_extra = st.text_area("✍️ Notas / Duda:", placeholder="Ej: Talón negro. ¿Desbrido?", height=100)
 
     with col2:
-        st.subheader("2. Resultados y Validación")
+        st.subheader("2. Resultados")
         
-        if archivo_actual and st.button("🚀 ANALIZAR Y VALIDAR", type="primary"):
+        if archivo_actual and st.button("🚀 ANALIZAR", type="primary"):
             if not api_key:
-                st.error("❌ Falta la API Key")
+                st.error("❌ Pega tu API Key primero.")
             else:
-                with st.spinner("🔍 Analizando con IA Flash..."):
+                with st.spinner("Procesando con motor clásico..."):
                     try:
                         genai.configure(api_key=api_key)
-                        # CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash' que es el modelo estable y gratuito
-                        model = genai.GenerativeModel("gemini-1.5-flash") 
+                        
+                        # LÓGICA DE SELECCIÓN DE MODELO (EL TRUCO ANTI-ERROR)
+                        # Si es PDF (solo texto) -> Usamos gemini-pro
+                        # Si es Imagen -> Usamos gemini-pro-vision
                         
                         contenido = []
+                        nombre_modelo = "gemini-pro" # Por defecto texto
+                        
                         prompt_archivos = ""
                         
                         if archivo_actual.type == "application/pdf":
-                            prompt_archivos += f"\nDOCUMENTO ACTUAL:\n{leer_pdf(archivo_actual)}"
+                            prompt_archivos += f"\nDOCUMENTO PDF:\n{leer_pdf(archivo_actual)}"
+                            nombre_modelo = "gemini-pro" 
                         else:
                             contenido.append(Image.open(archivo_actual))
-                            prompt_archivos += "\n[IMAGEN 1: ESTADO ACTUAL]"
+                            prompt_archivos += "\n[IMAGEN ADJUNTA]"
+                            nombre_modelo = "gemini-pro-vision" # Modelo visual clásico
+                        
+                        # Cargamos el modelo seguro
+                        model = genai.GenerativeModel(nombre_modelo)
 
-                        if archivo_previo:
-                            contenido.append(Image.open(archivo_previo))
-                            prompt_archivos += "\n[IMAGEN 2: ESTADO PREVIO]"
-
+                        # Preparar Protocolo
                         prompt_protocolo = ""
                         if texto_protocolo:
-                            prompt_protocolo = f"⚠️ IMPORTANTE: JUSTIFICA TUS RESPUESTAS USANDO ESTE PROTOCOLO:\n{texto_protocolo[:30000]}\nCita la página si es posible."
+                            prompt_protocolo = f"USA ESTE PROTOCOLO:\n{texto_protocolo[:10000]}\n"
                         else:
-                            prompt_protocolo = "⚠️ IMPORTANTE: JUSTIFICA TUS RESPUESTAS USANDO GUÍAS INTERNACIONALES (GNEAUPP, EPUAP)."
+                            prompt_protocolo = "USA GUÍAS CLÍNICAS ESTÁNDAR (GNEAUPP, AHA)."
 
+                        # El Prompt Maestro
                         full_prompt = f"""
-                        Actúa como Enfermera Clínica Especialista en Heridas (Estomaterapeuta).
-                        CONTEXTO: {contexto}. MODO: {modo}.
-                        NOTAS USUARIO: "{info_extra}"
+                        Actúa como Enfermera Experta. Contexto: {contexto}. Modo: {modo}.
+                        Notas Usuario: "{info_extra}"
                         
                         {prompt_archivos}
                         {prompt_protocolo}
                         
-                        TAREA ESPECÍFICA:
+                        TAREAS:
+                        1. Si es HERIDA: Diagnostica (TIME), busca NECROSIS.
+                           * REGLA SEGURIDAD: SI ES TALÓN + NECROSIS SECA -> NO DESBRIDAR.
+                           * Valida el tratamiento del usuario.
+                        2. Si es ECG/Analítica: Busca valores críticos.
                         
-                        SI ES 🩹 HERIDAS:
-                        1. DIAGNÓSTICO (Tipo, Estadio, Localización).
-                        2. ANÁLISIS TISULAR (TIME): % Granulación / Esfacelos / Necrosis.
-                        3. REGLA SEGURIDAD TALÓN: Si es Talón + Necrosis Seca -> NO DESBRIDAR, MANTENER SECO.
-                        4. PLAN DE CURAS: Producto exacto y frecuencia.
-                        
-                        SI ES OTRO MODO: Analítica, ECG, Rx... Analiza valores críticos.
-                        
-                        FORMATO DE SALIDA (Markdown):
-                        - 🩺 DIAGNÓSTICO
-                        - 🚨 SEGURIDAD / ALERTAS
-                        - ✅/❌ VALIDACIÓN TRATAMIENTO
-                        - 📝 PLAN DE CUIDADOS
+                        Responde en Markdown claro con: Diagnóstico, Alertas y Plan.
                         """
                         
-                        response = model.generate_content([full_prompt, *contenido])
+                        # Generar
+                        if nombre_modelo == "gemini-pro-vision":
+                            response = model.generate_content([full_prompt, *contenido])
+                        else:
+                            response = model.generate_content(full_prompt)
+                            
                         st.markdown(response.text)
-                        st.session_state.mensajes.append({"role": "assistant", "content": f"**Análisis {modo}:**\n{response.text}"})
+                        st.session_state.mensajes.append({"role": "assistant", "content": f"**Análisis:**\n{response.text}"})
                         
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error técnico: {e}")
+                        st.info("Prueba a refrescar la página.")
 
 # --- PESTAÑA 2: CHAT ---
 with tab_chat:
-    st.info("💬 Habla con la IA.")
+    st.info("💬 Chat (Solo Texto)")
     for msg in st.session_state.mensajes:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-    if prompt := st.chat_input("Duda sobre el caso..."):
+            
+    if prompt := st.chat_input("Duda..."):
         if not api_key: st.warning("Falta API Key")
         else:
             st.session_state.mensajes.append({"role": "user", "content": prompt})
             with st.chat_message("user"): st.markdown(prompt)
             with st.chat_message("assistant"):
                 with st.spinner("Pensando..."):
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-                    historial = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.mensajes[-6:]])
-                    response = model.generate_content(f"Actúa como Enfermera Experta. Historial: {historial}\nPregunta Usuario: {prompt}")
-                    st.markdown(response.text)
-                    st.session_state.mensajes.append({"role": "assistant", "content": response.text})
+                    try:
+                        genai.configure(api_key=api_key)
+                        # Para chat usamos siempre el modelo de texto clásico
+                        model = genai.GenerativeModel("gemini-pro")
+                        
+                        historial = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.mensajes[-6:]])
+                        response = model.generate_content(f"Actúa como Enfermera. Historial:\n{historial}\nUsuario: {prompt}")
+                        
+                        st.markdown(response.text)
+                        st.session_state.mensajes.append({"role": "assistant", "content": response.text})
+                    except Exception as e:
+                        st.error(f"Error: {e}")
