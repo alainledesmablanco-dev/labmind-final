@@ -3,86 +3,93 @@ import google.generativeai as genai
 from PIL import Image
 import pypdf
 
-st.set_page_config(page_title="LabMind Selector", page_icon="🧬", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="LabMind Uncensored", page_icon="🏥", layout="wide")
 
 # --- BARRA LATERAL ---
 with st.sidebar:
-    st.title("LabMind Diagnóstico")
+    st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=80)
+    st.title("LabMind 6.0")
+    st.caption("✅ Filtros Médicos Activados")
     
-    # 1. METER LA CLAVE
-    api_key = st.text_input("1. Pega tu API Key:", type="password")
+    api_key = st.text_input("🔑 API Key:", type="password")
     
     st.divider()
-    
-    # 2. BUSCADOR DE MODELOS DISPONIBLES
-    modelo_elegido = "models/gemini-1.5-flash" # Por defecto
-    
-    if api_key:
+    protocolo_pdf = st.file_uploader("Sube Protocolo (PDF)", type="pdf")
+    texto_protocolo = ""
+    if protocolo_pdf:
         try:
-            genai.configure(api_key=api_key)
-            # Preguntamos a Google qué modelos nos deja usar con tu llave
-            lista_modelos = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    lista_modelos.append(m.name)
-            
-            st.success(f"✅ ¡Conectado! Tu llave permite usar {len(lista_modelos)} modelos.")
-            # Creamos el menú desplegable
-            modelo_elegido = st.selectbox("2. ELIGE EL CEREBRO:", lista_modelos, index=0)
-            st.caption("Si uno falla, prueba el siguiente de la lista.")
-            
-        except Exception as e:
-            st.error("❌ La clave parece incorrecta o no tiene permisos.")
-            st.write(e)
+            pdf_reader = pypdf.PdfReader(protocolo_pdf)
+            for page in pdf_reader.pages: texto_protocolo += page.extract_text() or ""
+            st.success("✅ Protocolo cargado")
+        except: st.error("Error PDF")
+
+    contexto = st.selectbox("Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio"])
 
 # --- CUERPO PRINCIPAL ---
-st.title("🩺 Unidad Clínica (Modo Selector)")
+st.title("🩺 Unidad Clínica (Sin Bloqueos)")
 
 col1, col2 = st.columns([1, 2])
-
 with col1:
-    modo = st.radio("Modo:", ["🩹 Heridas", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC"])
-    archivo = st.file_uploader("Subir Foto:", type=['jpg', 'png', 'jpeg', 'pdf'])
-    notas = st.text_area("Dudas / Notas:", height=100)
+    modo = st.radio("Modo:", ["🩹 Heridas (UPP)", "🩸 Analítica", "📈 ECG", "💀 Rx/TAC"])
+    archivo = st.file_uploader("Foto:", type=['jpg', 'png', 'jpeg', 'pdf'])
+    notas = st.text_area("Notas:", height=100)
 
 with col2:
-    if archivo and st.button("🚀 ANALIZAR AHORA"):
-        if not api_key:
-            st.warning("⚠️ Primero pon la API Key en la izquierda.")
+    if archivo and st.button("🚀 ANALIZAR", type="primary"):
+        if not api_key: st.warning("⚠️ Falta API Key")
         else:
-            with st.spinner(f"Analizando con {modelo_elegido}..."):
+            with st.spinner("Analizando sin filtros de seguridad..."):
                 try:
-                    # Configuración Directa
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel(modelo_elegido)
                     
-                    # Preparar imagen/pdf
+                    # 1. USAMOS FLASH (Es el que no da error de Cuota)
+                    model = genai.GenerativeModel("models/gemini-1.5-flash")
+                    
+                    # 2. CONFIGURACIÓN DE SEGURIDAD (LA CLAVE DEL ÉXITO)
+                    # Esto le dice a Google que permita ver "Gore" (Heridas) y contenido médico
+                    safety_settings = [
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                    ]
+                    
+                    # Preparar contenido
                     contenido = []
+                    prompt_extra = ""
+                    
                     if archivo.type == "application/pdf":
-                        pdf_reader = pypdf.PdfReader(archivo)
-                        texto = ""
-                        for page in pdf_reader.pages: texto += page.extract_text()
-                        prompt_contenido = f"CONTENIDO PDF:\n{texto}"
+                         if not texto_protocolo:
+                            pdf_reader = pypdf.PdfReader(archivo)
+                            text = ""
+                            for page in pdf_reader.pages: text += page.extract_text()
+                            prompt_extra = f"PDF ADJUNTO:\n{text}"
                     else:
                         contenido.append(Image.open(archivo))
-                        prompt_contenido = "Analiza esta imagen."
+                        prompt_extra = "Analiza esta imagen médica."
                     
-                    # Prompt
-                    full_prompt = f"""
-                    Actúa como Enfermero Experto. Modo: {modo}.
-                    Notas Usuario: {notas}.
+                    prompt = f"""
+                    Actúa como Enfermero Experto. Contexto: {contexto}. Modo: {modo}.
+                    Notas: {notas}.
                     
-                    {prompt_contenido}
+                    {prompt_extra}
+                    {f"Protocolo: {texto_protocolo[:10000]}" if texto_protocolo else ""}
                     
-                    TAREA: Dame Diagnóstico, Alertas y Plan de Cuidados.
+                    Dame Diagnóstico, Alertas y Plan de Cuidados.
                     """
                     
-                    # Ejecutar
-                    response = model.generate_content([full_prompt, *contenido])
+                    # 3. LLAMADA CON LOS SETTINGS DE SEGURIDAD
+                    response = model.generate_content(
+                        [prompt, *contenido],
+                        safety_settings=safety_settings
+                    )
+                    
                     st.markdown(response.text)
-                    st.balloons() # ¡Celebración si funciona!
                     
                 except Exception as e:
-                    st.error(f"❌ Error con el modelo {modelo_elegido}:")
-                    st.code(e)
-                    st.info("💡 CONSEJO: Cambia el modelo en la barra lateral (paso 2) y vuelve a darle al botón Analizar.")
+                    # Si falla, mostramos el error exacto
+                    st.error("Error:")
+                    st.write(e)
+                    if "block_reason" in str(e):
+                        st.warning("La IA sigue intentando bloquear la imagen por seguridad. Intenta recortar la foto para que se vea menos 'sangrienta' o prueba otra vez.")
