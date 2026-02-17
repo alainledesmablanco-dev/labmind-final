@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import pypdf
 import tempfile
 import time
@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 17.1", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="LabMind 18.0 (Inteligencia Clínica)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -25,6 +25,7 @@ st.markdown("""
     .box-diag { background-color: #ffebee; border-left: 6px solid #ef5350; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #c62828; }
     .box-action { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #1565c0; }
     .box-mat { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #2e7d32; }
+    .box-ai { background-color: #f3e5f5; border-left: 6px solid #9c27b0; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #6a1b9a; }
     .box-patient { font-weight: bold; color: #555; margin-bottom: 10px; display: block; }
 
     .alerta-dispositivo { background-color: #fff3cd; padding: 10px; border-radius: 5px; border-left: 5px solid #ffc107; color: #856404; font-weight: bold; margin-bottom: 10px;}
@@ -49,6 +50,7 @@ if "datos_grafica" not in st.session_state: st.session_state.datos_grafica = Non
 if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
 if "mostrar_enlace_magico" not in st.session_state: st.session_state.mostrar_enlace_magico = False
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
+if "area_herida" not in st.session_state: st.session_state.area_herida = None
 
 # --- AUTO-LOGIN ---
 try:
@@ -74,7 +76,7 @@ def mostrar_login():
 if not st.session_state.autenticado: mostrar_login(); st.stop()
 
 # ==========================================
-#      FUNCIONES AUXILIARES
+#      FUNCIONES AUXILIARES (OPEN CV & PDF)
 # ==========================================
 
 def create_pdf(texto_analisis):
@@ -91,7 +93,7 @@ def extraer_datos_grafica(txt):
     match = re.search(r'GRÁFICA_DATA: ({.*?})', txt)
     return eval(match.group(1)) if match else None
 
-# --- FUNCIÓN ANONIMIZAR ROSTROS (OPENCV) ---
+# --- FUNCIÓN 1: ANONIMIZAR ROSTROS (PRIVACIDAD) ---
 def anonymize_face(pil_image):
     img_np = np.array(pil_image.convert('RGB'))
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -113,6 +115,89 @@ def anonymize_face(pil_image):
         return Image.fromarray(img_rgb), True
     else: return pil_image, False
 
+# --- FUNCIÓN 2: MEDICIÓN DE HERIDAS (Pilar 1) ---
+def medir_herida(pil_image):
+    """
+    Intenta detectar una moneda de 1 euro (23.25mm) y calcular el área de la herida (tejido rojo/amarillo).
+    """
+    try:
+        # Convertir a OpenCV
+        img = np.array(pil_image.convert('RGB'))
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        
+        # 1. Detectar Moneda (Hough Circles)
+        # Suavizamos para evitar ruido
+        gray_blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+        circles = cv2.HoughCircles(gray_blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=50, param1=100, param2=30, minRadius=20, maxRadius=200)
+
+        area_real_cm2 = None
+        mensaje = "No se detectó moneda de referencia."
+        
+        if circles is not None:
+            circles = np.round(circles[0, :]).astype("int")
+            # Asumimos que el círculo más definido es la moneda
+            (x_c, y_c, r_c) = circles[0]
+            
+            # Dibujar moneda (Azul)
+            cv2.circle(img, (x_c, y_c), r_c, (0, 0, 255), 4)
+            cv2.putText(img, "Ref 1 Euro", (x_c - 20, y_c), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+            # CALCULO DE ESCALA
+            # Diámetro 1 Euro = 23.25 mm = 2.325 cm
+            # Radio real = 1.1625 cm
+            # Area real moneda = pi * r^2 = 3.1416 * (1.1625)^2 = 4.24 cm2
+            
+            # Píxeles por cm
+            pixels_per_cm = (r_c * 2) / 2.325
+            scale_factor = (1 / pixels_per_cm) ** 2 # cm2 per pixel
+
+            # 2. Detectar Herida (Color Thresholding)
+            # Convertimos a HSV para detectar rojo/rosa (carne) y amarillo (fibrina)
+            hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+            
+            # Máscara para rojos (Tejido granulación) - Rango 1
+            lower_red1 = np.array([0, 50, 50]); upper_red1 = np.array([10, 255, 255])
+            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            # Rango 2
+            lower_red2 = np.array([170, 50, 50]); upper_red2 = np.array([180, 255, 255])
+            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+            # Máscara para amarillos/negros (Fibrina/Necrosis)
+            lower_yel = np.array([10, 50, 50]); upper_yel = np.array([30, 255, 255])
+            mask3 = cv2.inRange(hsv, lower_yel, upper_yel)
+            
+            # Máscara combinada
+            mask_herida = mask1 + mask2 + mask3
+            
+            # Limpiamos ruido
+            kernel = np.ones((5,5),np.uint8)
+            mask_herida = cv2.morphologyEx(mask_herida, cv2.MORPH_OPEN, kernel)
+            
+            # IMPORTANTE: Borrar la zona de la moneda de la máscara de la herida
+            # Para que no cuente la moneda como herida si es dorada
+            cv2.circle(mask_herida, (x_c, y_c), r_c + 10, 0, -1)
+
+            # Encontrar contornos de la herida
+            cnts, _ = cv2.findContours(mask_herida, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            area_pixels_herida = 0
+            for c in cnts:
+                if cv2.contourArea(c) > 500: # Filtrar ruido pequeño
+                    cv2.drawContours(img, [c], -1, (0, 255, 0), 2) # Verde
+                    area_pixels_herida += cv2.contourArea(c)
+            
+            if area_pixels_herida > 0:
+                area_real_cm2 = area_pixels_herida * scale_factor
+                mensaje = f"Área Calculada: {area_real_cm2:.2f} cm²"
+                cv2.putText(img, f"Area: {area_real_cm2:.1f} cm2", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                mensaje = "Moneda detectada, pero no tejido herida claro."
+
+        return Image.fromarray(img), area_real_cm2, mensaje
+    except Exception as e:
+        return pil_image, None, f"Error medición: {e}"
+
+
 # ==========================================
 #      APP PRINCIPAL
 # ==========================================
@@ -130,7 +215,7 @@ with st.sidebar:
     if protocolo_pdf: st.success("✅ Protocolo")
 
 # --- MAIN ---
-st.title("🩺 LabMind 17.1 🛡️")
+st.title("🩺 LabMind 18.0")
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
@@ -149,27 +234,30 @@ with col1:
     ])
     st.markdown("---")
     
-    # --- AVISOS DE PRIVACIDAD SEGÚN MODO ---
-    if "Dermatología" in modo:
-        st.warning("⚠️ MODO DERMATOLOGÍA: El nublado automático de rostros está DESACTIVADO para permitir el análisis de lesiones faciales. Por favor, encuadre la foto con responsabilidad.")
-    else:
-        st.info("🛡️ MODO SEGURO: Se nublarán automáticamente los ojos/rostros detectados en las imágenes.")
-
+    # OPCIONES EXTRA SEGÚN MODO
     activar_detector = False
+    activar_medicion = False
+    
     if "RX" in modo or "Integral" in modo:
         activar_detector = st.checkbox("🕵️ Revisar Tubos/Vías", value=True)
+    
+    if "Heridas" in modo:
+        activar_medicion = st.checkbox("📏 Medición Automática (Pon una moneda de 1€)", value=False, help="Coloca una moneda de 1 Euro cerca de la herida para calcular su tamaño real.")
+
+    if "Dermatología" in modo:
+        st.warning("⚠️ MODO DERMATOLOGÍA: Nublado de rostros DESACTIVADO.")
 
     fuente = st.radio("Entrada:", ["📁 Archivo/Grabar", "📸 WebCam"], horizontal=True)
     archivos = []
     
+    # Lógica de Inputs
     if fuente == "📸 WebCam":
         if f := st.camera_input("Foto"): archivos.append(("cam", f))
     else:
         if "Heridas" in modo:
-            if f1:=st.file_uploader("Actual",type=['jpg','png'],key="h1"): archivos.append(("img",f1))
-            if f2:=st.file_uploader("Previa",type=['jpg','png'],key="h2"): archivos.append(("img",f2))
+            if f1:=st.file_uploader("Herida Actual (Con Moneda 1€ si mides)",type=['jpg','png'],key="h1"): archivos.append(("img",f1))
+            if f2:=st.file_uploader("Herida Previa",type=['jpg','png'],key="h2"): archivos.append(("img",f2))
         elif "Dermatología" in modo:
-            st.info("📸 Sube foto/vídeo de la lesión.")
             if f:=st.file_uploader("Lesión Piel",type=['jpg','png','mp4','mov'],key="d1"):
                 archivos.append(("video",f) if "video" in f.type else ("img",f))
         elif "ECG" in modo:
@@ -183,15 +271,16 @@ with col1:
 
     st.markdown("---")
     audio = st.audio_input("🎙️ Notas de Voz")
-    notas = st.text_area("Texto:", height=80)
+    notas = st.text_area("Texto (Opcional):", placeholder="Ej: Paciente diabético, toma Sintrom...", height=80)
 
 with col2:
     st.subheader("2. Análisis Clínico")
     
     if (archivos or audio) and st.button("🚀 ANALIZAR", type="primary"):
-        st.session_state.log_privacidad = [] # Limpiar log
+        st.session_state.log_privacidad = [] 
+        st.session_state.area_herida = None
         
-        with st.spinner("🧠 Procesando..."):
+        with st.spinner("🧠 Procesando imágenes y datos..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
@@ -208,42 +297,60 @@ with col2:
                     elif hasattr(a,'type') and a.type == "application/pdf":
                         r = pypdf.PdfReader(a); txt_c += "\nPDF: " + "".join([p.extract_text() for p in r.pages])
                     else:
-                        # --- LÓGICA CONDICIONAL DE PRIVACIDAD ---
                         img_pil = Image.open(a)
                         
-                        # SOLO aplicamos anonimización SI NO estamos en Dermato
+                        # A) PROCESO DE MEDICIÓN (SI ACTIVO Y ES HERIDA)
+                        if activar_medicion and "Heridas" in modo:
+                            img_medida, area, msg_medida = medir_herida(img_pil)
+                            if area:
+                                st.session_state.area_herida = f"{area:.2f} cm²"
+                                st.session_state.log_privacidad.append(f"📏 Medición Exitosa: {msg_medida}")
+                                img_pil = img_medida # Usamos la imagen con dibujos para el análisis
+                            else:
+                                st.session_state.log_privacidad.append(f"⚠️ Fallo Medición: {msg_medida}")
+                        
+                        # B) PROCESO DE PRIVACIDAD
                         if "Dermatología" not in modo:
                             img_final, fue_procesada = anonymize_face(img_pil)
-                            if fue_procesada:
-                                st.session_state.log_privacidad.append(f"🛡️ Rostro nublado en: {getattr(a, 'name', 'Cámara')}")
-                            txt_c += "\n[IMG (Procesada)]\n"
+                            if fue_procesada: st.session_state.log_privacidad.append(f"🛡️ Rostro nublado por seguridad.")
                         else:
-                            # En dermato, pasamos la imagen original
                             img_final = img_pil
-                            txt_c += "\n[IMG (Original Dermato)]\n"
+                        
+                        con.append(img_final); txt_c += "\n[IMG]\n"
 
-                        con.append(img_final)
+                # CONTEXTO MEDICIÓN EN EL PROMPT
+                dato_medicion = ""
+                if st.session_state.area_herida:
+                    dato_medicion = f"DATOS OBJETIVOS: La herida ha sido medida por visión artificial y tiene un ÁREA DE {st.session_state.area_herida}. Úsalo para el pronóstico."
 
-                res_ins = "CONTEXTO RESIDENCIA: Material in situ. NO pruebas complejas." if "Residencia" in contexto else ""
-                
+                # PROMPTS AVANZADOS
                 prompt_esp = ""
-                if "Dermato" in modo: prompt_esp = "MODO DERMA: ABCDE, morfología, sugiere tópico/derivación. NO NUBLAR LESIONES."
-                elif "Heridas" in modo: prompt_esp = "MODO HERIDAS: TIME, bordes, exudado. Sugiere APÓSITOS."
-                elif "ECG" in modo: prompt_esp = "MODO ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
+                if "Dermato" in modo: 
+                    prompt_esp = "MODO DERMA: Regla ABCDE. Morfología. NO NUBLAR."
+                elif "Heridas" in modo: 
+                    prompt_esp = f"""MODO HERIDAS AVANZADO:
+                    1. Analiza lecho (TIME).
+                    2. PREDICCIÓN: Estima probabilidad de cicatrización en 4 semanas basado en el tejido (necrótico/granulado) y comorbilidades.
+                    3. INTERACCIÓN: Si detectas fármacos (corticoides, anticoagulantes), alerta sobre su efecto en la herida.
+                    {dato_medicion}"""
+                elif "ECG" in modo: 
+                    prompt_esp = "MODO ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
 
                 prompt = f"""
                 Rol: Enfermera Especialista (APN). Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
-                {res_ins} {prompt_esp}
+                {prompt_esp}
                 { "VERIFICA TUBOS/VÍAS: TET, SNG, CVC." if activar_detector else "" }
                 MATERIAL: {txt_c}
+                {f"PROTOCOLO: {texto_protocolo[:10000]}" if texto_protocolo else ""}
                 
                 OUTPUT FORMAT (STRICT):
                 ---
                 ### ⚡ RESUMEN
-                * **👤 PACIENTE:** [Datos Anonimizados]
-                * **🚨 DIAGNÓSTICO:** [Texto breve]
-                * **🩹 ACCIÓN:** [Texto breve]
-                * **🧴 MATERIAL:** [Lista breve]
+                * **👤 PACIENTE:** [Anonimizado]
+                * **🚨 DIAGNÓSTICO:** [Breve]
+                * **🩹 ACCIÓN:** [Inmediata]
+                * **🔮 PREDICCIÓN:** [Tiempo estimado cierre / Pronóstico]
+                * **🧴 MATERIAL:** [Lista]
                 ---
                 ### 📝 DETALLE
                 [Resto del análisis]
@@ -260,19 +367,18 @@ with col2:
 
     # RENDERIZADO
     if st.session_state.resultado_analisis:
-        # MOSTRAR LOG SI HUBO NUBLADO
-        if st.session_state.log_privacidad and "Dermatología" not in modo:
-            with st.expander("🛡️ Reporte de Privacidad", expanded=True):
+        # VISOR DE IMAGEN PROCESADA (Con moneda y contornos)
+        if activar_medicion and con and isinstance(con[0], Image.Image):
+             with st.expander("📸 Ver Imagen Procesada (Medición)", expanded=True):
+                 st.image(con[0], caption="Análisis Visión Artificial", use_container_width=True)
+
+        # LOGS
+        if st.session_state.log_privacidad:
+            with st.expander("ℹ️ Información del Sistema", expanded=False):
                 for log in st.session_state.log_privacidad: st.caption(f"✅ {log}")
 
         txt = st.session_state.resultado_analisis
-        
-        if "⚠️ ALERTA" in txt or "MAL POSICIONADO" in txt:
-            st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR DISPOSITIVO</div>', unsafe_allow_html=True)
-        
-        if st.session_state.datos_grafica:
-            d = st.session_state.datos_grafica
-            f, ax = plt.subplots(figsize=(6,2)); ax.plot(list(d.keys()), list(d.values()), 'o-r'); ax.grid(True, alpha=0.3); st.pyplot(f)
+        if "⚠️ ALERTA" in txt: st.markdown('<div class="alerta-dispositivo">🚨 ALERTA CLÍNICA / SEGURIDAD</div>', unsafe_allow_html=True)
         
         parts = txt.split("---")
         if len(parts) >= 3:
@@ -284,6 +390,7 @@ with col2:
                 if "👤 PACIENTE" in line: html_resumen += f'<span class="box-patient">👤 {line.replace("👤 PACIENTE:", "").strip()} <span class="privacidad-tag">Anonimizado</span></span>'
                 elif "🚨 DIAGNÓSTICO" in line: html_resumen += f'<div class="box-diag"><b>🚨 DIAGNÓSTICO:</b><br>{line.replace("🚨 DIAGNÓSTICO:", "").strip()}</div>'
                 elif "🩹 ACCIÓN" in line: html_resumen += f'<div class="box-action"><b>🩹 ACCIÓN:</b><br>{line.replace("🩹 ACCIÓN:", "").strip()}</div>'
+                elif "🔮 PREDICCIÓN" in line: html_resumen += f'<div class="box-ai"><b>🔮 PREDICCIÓN IA:</b><br>{line.replace("🔮 PREDICCIÓN:", "").strip()}</div>'
                 elif "🧴 MATERIAL" in line: html_resumen += f'<div class="box-mat"><b>🧴 MATERIAL:</b><br>{line.replace("🧴 MATERIAL:", "").strip()}</div>'
             html_resumen += '</div>'
             st.markdown(html_resumen, unsafe_allow_html=True)
