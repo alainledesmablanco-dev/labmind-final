@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.1", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.2", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -55,10 +55,12 @@ def mostrar_login():
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
         st.title("LabMind Acceso")
-        st.info("🔐 Login Seguro: Introduce un nombre y tu clave.")
+        st.info("🔐 Tu navegador recordará la clave si rellenas ambos campos.")
         
         with st.form("login_form"):
-            usuario = st.text_input("Usuario:", value="Sanitario")
+            # CAMBIO: Quitamos el 'value="Sanitario"' para que el campo empiece vacío.
+            # Esto ayuda a Safari a detectar que debe rellenarlo él.
+            usuario = st.text_input("Usuario:", placeholder="Ej: Sanitario (Escribe algo para activar guardar)")
             clave_input = st.text_input("API Key:", type="password")
             submit_button = st.form_submit_button("🔓 ENTRAR")
             
@@ -93,22 +95,13 @@ def create_pdf(texto_analisis):
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", size=10)
-    
-    # Fecha y Hora
     fecha = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     pdf.cell(0, 10, f"Fecha del Informe: {fecha}", 0, 1)
     pdf.ln(5)
     
-    # Limpieza estricta de caracteres para PDF
-    # Reemplazamos caracteres que suelen romper FPDF
     texto_limpio = texto_analisis.replace('€', 'EUR').replace('’', "'").replace('“', '"').replace('”', '"')
-    
-    # Codificación segura a Latin-1 (compatible con PDF estándar)
     texto_encoded = texto_limpio.encode('latin-1', 'replace').decode('latin-1')
-    
     pdf.multi_cell(0, 5, texto_encoded)
-    
-    # Devolver bytes puros
     return pdf.output(dest='S').encode('latin-1')
 
 def extraer_datos_grafica(texto):
@@ -139,12 +132,11 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 15.1")
+st.title("🩺 LabMind 15.2")
 
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
-    # CABECERA DIVIDIDA
     cabecera_col1, cabecera_col2 = st.columns([1, 1.5])
     with cabecera_col1:
         st.subheader("1. Captura")
@@ -185,7 +177,7 @@ with col1:
             if f:
                 if f.type in ['video/mp4','video/quicktime','video/x-msvideo']: archivos.append(("video", f))
                 else: archivos.append(("img", f))
-        else: # Analíticas, Farmacia, Integral
+        else:
             fs = st.file_uploader("Subir Documentos/Fotos", accept_multiple_files=True, key="u5")
             if fs: 
                 for f in fs: archivos.append(("doc", f))
@@ -224,7 +216,6 @@ with col2:
                     else:
                         img = Image.open(a); contenido_ia.append(img); txt_contexto += "\n[IMAGEN]\n"
 
-                # Lógica Residencia
                 instruccion_residencia = ""
                 if "Residencia" in contexto:
                     instruccion_residencia = """
@@ -275,7 +266,6 @@ with col2:
                 st.session_state.resultado_analisis = resp.text
                 st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
                 
-                # Generar PDF limpio
                 texto_limpio = resp.text.replace("GRÁFICA_DATA:", "").split("{'")[0]
                 st.session_state.pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
 
@@ -304,11 +294,8 @@ with col2:
         
         st.divider()
         
-        # BOTÓN DE DESCARGA PDF CORREGIDO
         if st.session_state.pdf_bytes:
-            # Nombre de archivo sin espacios para evitar errores del navegador
             nombre_archivo = f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf"
-            
             st.download_button(
                 label="📥 DESCARGAR INFORME PDF",
                 data=st.session_state.pdf_bytes,
