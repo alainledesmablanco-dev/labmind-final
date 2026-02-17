@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.1", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -83,20 +83,32 @@ def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self):
             self.set_font('Arial', 'B', 12)
-            self.cell(0, 10, 'LabMind - Informe Clínico IA', 0, 1, 'C')
+            self.cell(0, 10, 'LabMind - Informe IA', 0, 1, 'C')
             self.ln(5)
         def footer(self):
             self.set_y(-15)
             self.set_font('Arial', 'I', 8)
             self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
+            
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", size=10)
+    
+    # Fecha y Hora
     fecha = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-    pdf.cell(0, 10, f"Fecha: {fecha}", 0, 1)
+    pdf.cell(0, 10, f"Fecha del Informe: {fecha}", 0, 1)
     pdf.ln(5)
-    texto_limpio = texto_analisis.encode('latin-1', 'replace').decode('latin-1')
-    pdf.multi_cell(0, 5, texto_limpio)
+    
+    # Limpieza estricta de caracteres para PDF
+    # Reemplazamos caracteres que suelen romper FPDF
+    texto_limpio = texto_analisis.replace('€', 'EUR').replace('’', "'").replace('“', '"').replace('”', '"')
+    
+    # Codificación segura a Latin-1 (compatible con PDF estándar)
+    texto_encoded = texto_limpio.encode('latin-1', 'replace').decode('latin-1')
+    
+    pdf.multi_cell(0, 5, texto_encoded)
+    
+    # Devolver bytes puros
     return pdf.output(dest='S').encode('latin-1')
 
 def extraer_datos_grafica(texto):
@@ -127,7 +139,7 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 15.0")
+st.title("🩺 LabMind 15.1")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -137,7 +149,6 @@ with col1:
     with cabecera_col1:
         st.subheader("1. Captura")
     with cabecera_col2:
-        # --- NUEVO: AÑADIDO RESIDENCIA ---
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia (Geriatría)", "Urgencias", "UCI", "Domicilio"])
     
     modo = st.radio("Modo:", [
@@ -157,7 +168,6 @@ with col1:
     fuente = st.radio("Entrada:", ["📁 Archivo/Grabar", "📸 WebCam"], horizontal=True)
     archivos = []
     
-    # LOGICA DE ARCHIVOS
     if fuente == "📸 WebCam":
         foto = st.camera_input("Foto")
         if foto: archivos.append(("cam", foto))
@@ -167,17 +177,14 @@ with col1:
             f2 = st.file_uploader("Subir Foto Previa", type=['jpg','png'], key="u2")
             if f1: archivos.append(("img", f1))
             if f2: archivos.append(("img", f2))
-        
         elif modo == "📈 ECG": 
             f = st.file_uploader("Subir Electro (Foto/PDF)", type=['jpg','png','pdf'], key="u3")
             if f: archivos.append(("img", f))
-
         elif modo == "💀 RX / TAC / RMN (Patología + Disp)":
             f = st.file_uploader("Subir Imagen o VÍDEO", type=['jpg','png','mp4','mov','avi'], key="u4")
             if f:
                 if f.type in ['video/mp4','video/quicktime','video/x-msvideo']: archivos.append(("video", f))
                 else: archivos.append(("img", f))
-        
         else: # Analíticas, Farmacia, Integral
             fs = st.file_uploader("Subir Documentos/Fotos", accept_multiple_files=True, key="u5")
             if fs: 
@@ -217,29 +224,22 @@ with col2:
                     else:
                         img = Image.open(a); contenido_ia.append(img); txt_contexto += "\n[IMAGEN]\n"
 
-                # --- LÓGICA ESPECIAL PARA RESIDENCIA ---
+                # Lógica Residencia
                 instruccion_residencia = ""
                 if "Residencia" in contexto:
                     instruccion_residencia = """
-                    IMPORTANTE (CONTEXTO RESIDENCIA):
-                    - Dispones de enfermería experta y material de curas (apósitos, cremas).
-                    - NO tienes recursos hospitalarios inmediatos: NO pidas cultivos, ni pruebas de imagen complejas salvo urgencia vital.
-                    - Tu objetivo es manejar la patología in situ siempre que sea seguro.
+                    CONTEXTO RESIDENCIA (GERIATRÍA):
+                    - Céntrate en cuidados de enfermería in situ.
+                    - Dispones de material de curas básico/avanzado.
+                    - NO solicites pruebas hospitalarias complejas salvo urgencia vital.
                     """
 
                 prompt_detector = ""
                 prompt_especifico = ""
-
                 if modo == "📈 ECG":
-                    prompt_especifico = "ANÁLISIS ECG: Identifica Ritmo, Frecuencia, Eje, QRS, ST y T."
-                
+                    prompt_especifico = "ANÁLISIS ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
                 elif activar_detector:
-                    prompt_detector = """
-                    VERIFICA LA SEGURIDAD DE LOS DISPOSITIVOS:
-                    1. Tubo Endotraqueal (TET).
-                    2. Sonda Nasogástrica (SNG).
-                    3. Vías Centrales (CVC).
-                    """
+                    prompt_detector = "VERIFICA TUBOS/VÍAS: TET, SNG, CVC."
 
                 full_prompt = f"""
                 Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}.
@@ -252,10 +252,10 @@ with col2:
                 MATERIAL: {txt_contexto}
                 {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else ""}
 
-                INSTRUCCIONES PRINCIPALES:
-                1. DIAGNÓSTICO CLÍNICO: Busca patologías principales.
-                2. SI ES IMAGEN: Describe hallazgos radiológicos.
-                3. Anonimiza al paciente.
+                INSTRUCCIONES:
+                1. DIAGNÓSTICO CLÍNICO PRINCIPAL.
+                2. SI ES IMAGEN: Describe hallazgos.
+                3. Anonimiza datos.
                 
                 SALIDA (Usa "---"):
                 ---
@@ -263,7 +263,7 @@ with col2:
                 * **👤 PACIENTE:** [Datos]
                 * **🚨 DIAGNÓSTICO:** [Principal]
                 * **🩹 ACCIÓN:** [Plan inmediato]
-                * **🧴 MATERIAL:** [LISTA ESQUEMÁTICA DEL MATERIAL DE CURAS NECESARIO: Limpiador, Primario, Secundario]
+                * **🧴 MATERIAL:** [LISTA ESQUEMÁTICA MATERIAL NECESARIO]
                 ---
                 ### 📝 ANÁLISIS DETALLADO
                 [Desarrollo completo]
@@ -275,6 +275,7 @@ with col2:
                 st.session_state.resultado_analisis = resp.text
                 st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
                 
+                # Generar PDF limpio
                 texto_limpio = resp.text.replace("GRÁFICA_DATA:", "").split("{'")[0]
                 st.session_state.pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
 
@@ -303,10 +304,15 @@ with col2:
         
         st.divider()
         
+        # BOTÓN DE DESCARGA PDF CORREGIDO
         if st.session_state.pdf_bytes:
+            # Nombre de archivo sin espacios para evitar errores del navegador
+            nombre_archivo = f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf"
+            
             st.download_button(
                 label="📥 DESCARGAR INFORME PDF",
                 data=st.session_state.pdf_bytes,
-                file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf",
-                mime="application/pdf"
+                file_name=nombre_archivo,
+                mime="application/pdf",
+                key="btn_descarga_pdf"
             )
