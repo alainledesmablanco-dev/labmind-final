@@ -4,7 +4,7 @@ from PIL import Image
 import pypdf
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind Camera", page_icon="📸", layout="wide")
+st.set_page_config(page_title="LabMind App", page_icon="🏥", layout="wide")
 
 # --- ESTILOS ---
 st.markdown("""
@@ -17,8 +17,8 @@ st.markdown("""
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=80)
-    st.title("LabMind 8.0")
-    st.caption("📸 Cámara Nativa + Gemini 3")
+    st.title("LabMind Pro")
+    st.caption("v8.1 - Estación Clínica")
     
     api_key = st.text_input("🔑 API Key:", type="password")
     
@@ -35,7 +35,7 @@ with st.sidebar:
     contexto = st.selectbox("Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio", "Consulta"])
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 Estación Clínica Móvil")
+st.title("🩺 Estación Clínica Inteligente")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -46,19 +46,17 @@ with col1:
     st.markdown("---")
     
     # --- SELECTOR: ¿ARCHIVO O CÁMARA? ---
-    fuente_imagen = st.radio("¿Cómo quieres subir la imagen?", ["📁 Subir Archivo", "📸 Cámara Directa"], horizontal=True)
+    fuente_imagen = st.radio("Fuente:", ["📁 Subir Archivo", "📸 Cámara Directa"], horizontal=True)
     
     archivos_procesar = [] 
 
-    # CASO 1: CÁMARA DIRECTA (NUEVO)
+    # CASO 1: CÁMARA DIRECTA
     if fuente_imagen == "📸 Cámara Directa":
-        # Nota: La cámara solo permite 1 foto a la vez por limitación del navegador
-        foto_camara = st.camera_input("Haz la foto ahora")
+        foto_camara = st.camera_input("Tomar foto")
         if foto_camara:
             archivos_procesar.append(("foto_camara", foto_camara))
-            st.success("Foto capturada correctamente.")
 
-    # CASO 2: SUBIR ARCHIVO (EL DE SIEMPRE)
+    # CASO 2: SUBIR ARCHIVO
     else:
         if modo == "🩹 Heridas":
             st.info("📸 Sube foto actual (y previa opcional).")
@@ -68,7 +66,7 @@ with col1:
             if f_previa: archivos_procesar.append(("img_previa", f_previa))
 
         elif modo == "📊 Analíticas/Informes" or modo == "🧩 Integral":
-            st.info("📂 Sube todos los documentos.")
+            st.info("📂 Sube todos los documentos del caso.")
             files = st.file_uploader("Archivos:", type=['pdf', 'jpg', 'png', 'jpeg'], accept_multiple_files=True)
             if files:
                 for f in files: archivos_procesar.append(("doc", f))
@@ -78,18 +76,20 @@ with col1:
             if f: archivos_procesar.append(("unico", f))
 
     st.markdown("---")
-    notas = st.text_area("✍️ Notas rápidas:", placeholder="Ej: Úlcera sacra, mal olor...", height=100)
+    notas = st.text_area("✍️ Notas clínicas:", placeholder="Ej: Úlcera sacra, mal olor...", height=100)
 
 with col2:
-    st.subheader("2. Análisis (Gemini 3 Flash)")
+    # --- AQUI ESTÁ EL CAMBIO: TÍTULO LIMPIO ---
+    st.subheader("2. Resultados del Análisis")
     
     if archivos_procesar and st.button("🚀 ANALIZAR AHORA", type="primary"):
         if not api_key:
             st.warning("⚠️ Falta API Key.")
         else:
-            with st.spinner("🧠 Procesando imagen..."):
+            with st.spinner("🧠 Procesando datos clínicos..."):
                 try:
                     genai.configure(api_key=api_key)
+                    # MOTOR INTERNO: SIGUE SIENDO GEMINI 3 FLASH (EL MEJOR)
                     model = genai.GenerativeModel("models/gemini-3-flash-preview")
                     
                     # SEGURIDAD OFF
@@ -106,11 +106,10 @@ with col2:
                             for page in pdf_reader.pages: texto_pdf += page.extract_text() or ""
                             contexto_archivos += f"\n--- PDF ---\n{texto_pdf}\n"
                         else:
-                            # Imagen (sea de archivo o de cámara)
                             img = Image.open(archivo)
                             contenido_ia.append(img)
-                            if tipo == "foto_camara": contexto_archivos += "\n[IMAGEN TOMADA CON CÁMARA AHORA MISMO]\n"
-                            elif tipo == "img_previa": contexto_archivos += "\n[IMAGEN PREVIA (HISTÓRICO)]\n"
+                            if tipo == "foto_camara": contexto_archivos += "\n\n"
+                            elif tipo == "img_previa": contexto_archivos += "\n\n"
                             else: contexto_archivos += "\n[IMAGEN ADJUNTA]\n"
 
                     # --- PROMPT ---
@@ -128,7 +127,7 @@ with col2:
 
                     FORMATO DE SALIDA (2 PARTES con "---"):
                     ---
-                    ### ⚡ RESUMEN
+                    ### ⚡ RESUMEN CLÍNICO
                     * **👤 PACIENTE:** [Anonimizado].
                     * **🚨 DIAGNÓSTICO:** [Principal].
                     * **🩹 ACCIÓN:** [Inmediata].
