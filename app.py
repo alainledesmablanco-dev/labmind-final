@@ -11,19 +11,45 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 12.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 13.1", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS ---
+# --- ESTILOS CSS (AQUÍ ESTÁ EL TRUCO DE TRADUCCIÓN) ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     .esquema-rapido { background-color: #e8f4ff; padding: 15px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
     .alerta-dispositivo { background-color: #ffe6e6; padding: 10px; border-radius: 5px; border-left: 5px solid #ff4444; color: #cc0000; font-weight: bold; margin-bottom: 10px;}
     .login-box { max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 10px; background-color: #f8f9fa; border: 1px solid #ddd; text-align: center; }
+
+    /* --- TRADUCCIÓN FORZADA DEL UPLOADER (TRUCO CSS) --- */
+    [data-testid='stFileUploaderDropzone'] div div span {
+       display: none; /* Oculta el texto "Drag and drop..." */
+    }
+    [data-testid='stFileUploaderDropzone'] div div::after {
+       content: "Arrastra y suelta archivos aquí"; /* Pone texto en Español */
+       font-size: 1rem;
+       font-weight: bold;
+       color: #444;
+       display: block;
+    }
+    [data-testid='stFileUploaderDropzone'] div div small {
+       display: none; /* Oculta "Limit 200MB..." */
+    }
+    [data-testid='stFileUploaderDropzone'] div div::before {
+       content: "Límite: 200MB por archivo"; /* Pone límite en Español */
+       font-size: 0.8rem;
+       color: #888;
+       display: block;
+       margin-bottom: 5px;
+    }
+    /* Intentar cambiar botón Browse (puede variar según navegador) */
+    [data-testid='stFileUploaderDropzone'] button {
+       border-color: #0066cc;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN (LOGIN) ---
+# --- GESTIÓN DE SESIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "api_key" not in st.session_state:
@@ -52,7 +78,6 @@ def mostrar_login():
             else:
                 st.warning("⚠️ Introduce una clave válida")
 
-# SI NO ESTÁ AUTENTICADO, MUESTRA LOGIN Y PARA
 if not st.session_state.autenticado:
     mostrar_login()
     st.stop()
@@ -126,20 +151,26 @@ with st.sidebar:
     contexto = st.selectbox("Contexto:", ["UCI", "Urgencias", "Hospitalización", "Domicilio"])
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 12.0")
+st.title("🩺 LabMind 13.1")
 
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
     st.subheader("1. Captura")
     
-    modo = st.radio("Modo:", ["🩹 Heridas", "📊 Analíticas", "💊 Farmacia", "💀 RX/TAC (Detector Dispositivos)", "🧩 Integral"])
+    modo = st.radio("Modo:", [
+        "🩹 Heridas", 
+        "📊 Analíticas", 
+        "📈 ECG", 
+        "💊 Farmacia", 
+        "💀 RX / TAC / RMN (Patología + Disp)", 
+        "🧩 Integral"
+    ])
     st.markdown("---")
     
-    # CHECKBOX DETECTOR (Solo visible en modo imagen)
     activar_detector = False
-    if modo == "💀 RX/TAC (Detector Dispositivos)" or modo == "🧩 Integral":
-        activar_detector = st.checkbox("🕵️ Activar Detector de Tubos/Vías", value=True, help="Analiza posición de SNG, Tubo ET y Catéteres.")
+    if modo == "💀 RX / TAC / RMN (Patología + Disp)" or modo == "🧩 Integral":
+        activar_detector = st.checkbox("🕵️ Revisar Tubos/Vías (Seguridad)", value=True, help="Verifica posición de SNG, TET, etc.")
 
     fuente = st.radio("Entrada:", ["📁 Archivo/Grabar", "📸 WebCam"], horizontal=True)
     archivos = []
@@ -150,17 +181,23 @@ with col1:
         if foto: archivos.append(("cam", foto))
     else:
         if modo == "🩹 Heridas":
-            f1 = st.file_uploader("Actual", type=['jpg','png'])
-            f2 = st.file_uploader("Previa", type=['jpg','png'])
+            f1 = st.file_uploader("Subir Foto Actual", type=['jpg','png'], key="u1")
+            f2 = st.file_uploader("Subir Foto Previa", type=['jpg','png'], key="u2")
             if f1: archivos.append(("img", f1))
             if f2: archivos.append(("img", f2))
-        elif modo == "💀 RX/TAC (Detector Dispositivos)":
-            f = st.file_uploader("Rx/TAC/Video:", type=['jpg','png','mp4','mov'])
+        
+        elif modo == "📈 ECG": 
+            f = st.file_uploader("Subir Electro (Foto/PDF)", type=['jpg','png','pdf'], key="u3")
+            if f: archivos.append(("img", f))
+
+        elif modo == "💀 RX / TAC / RMN (Patología + Disp)":
+            f = st.file_uploader("Subir Imagen o VÍDEO", type=['jpg','png','mp4','mov','avi'], key="u4")
             if f:
-                if f.type in ['video/mp4','video/quicktime']: archivos.append(("video", f))
+                if f.type in ['video/mp4','video/quicktime','video/x-msvideo']: archivos.append(("video", f))
                 else: archivos.append(("img", f))
-        else:
-            fs = st.file_uploader("Docs/Fotos:", accept_multiple_files=True)
+        
+        else: # Analíticas, Farmacia, Integral
+            fs = st.file_uploader("Subir Documentos/Fotos", accept_multiple_files=True, key="u5")
             if fs: 
                 for f in fs: archivos.append(("doc", f))
 
@@ -177,7 +214,6 @@ with col2:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
                 
-                # PREPARAR CONTENIDO
                 contenido_ia = []
                 txt_contexto = ""
                 
@@ -199,16 +235,18 @@ with col2:
                     else:
                         img = Image.open(a); contenido_ia.append(img); txt_contexto += "\n[IMAGEN]\n"
 
-                # --- PROMPT CON DETECTOR DE DISPOSITIVOS ---
                 prompt_detector = ""
-                if activar_detector:
+                prompt_especifico = ""
+
+                if modo == "📈 ECG":
+                    prompt_especifico = "ANÁLISIS ECG: Identifica Ritmo, Frecuencia, Eje, intervalo PR, QRS, segmento ST y ondas T. Busca bloqueos o isquemia."
+                
+                elif activar_detector:
                     prompt_detector = """
-                    🚨 PROTOCOLO DE DISPOSITIVOS MÉDICOS ACTIVO:
-                    Debes verificar OBLIGATORIAMENTE la posición de cualquier cuerpo extraño visible:
-                    1. Tubo Endotraqueal (TET): ¿Distancia a carina? ¿Selectivo en bronquio?
-                    2. Sonda Nasogástrica (SNG): ¿Punta en estómago o esófago? ¿Paso por hiato?
-                    3. Vías Centrales (CVC): ¿Punta en vena cava superior? ¿Signos de neumotórax?
-                    SI DETECTAS MALPOSICIÓN, INICIA LA RESPUESTA CON: "⚠️ ALERTA: DISPOSITIVO MAL POSICIONADO".
+                    VERIFICA LA SEGURIDAD DE LOS DISPOSITIVOS:
+                    1. Tubo Endotraqueal (TET).
+                    2. Sonda Nasogástrica (SNG).
+                    3. Vías Centrales (CVC).
                     """
 
                 full_prompt = f"""
@@ -216,15 +254,16 @@ with col2:
                 Notas: "{notas}"
                 {contexto_calc}
                 
+                {prompt_especifico}
                 {prompt_detector}
 
                 MATERIAL: {txt_contexto}
                 {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else ""}
 
-                INSTRUCCIONES:
-                1. Anonimiza al paciente.
-                2. Si es MODO FARMACIA: Busca interacciones.
-                3. Si es MODO SERIE: Busca datos para GRÁFICA_DATA: {{'Ene': 10, 'Feb': 12}}.
+                INSTRUCCIONES PRINCIPALES:
+                1. DIAGNÓSTICO CLÍNICO: Busca patologías principales.
+                2. SI ES IMAGEN: Describe hallazgos radiológicos.
+                3. Anonimiza al paciente.
                 
                 SALIDA (Usa "---"):
                 ---
@@ -233,8 +272,8 @@ with col2:
                 * **🚨 DIAGNÓSTICO:** [Principal]
                 * **🩹 ACCIÓN:** [Plan]
                 ---
-                ### 📝 DETALLE
-                [Análisis completo]
+                ### 📝 ANÁLISIS DETALLADO
+                [Desarrollo completo]
                 """
                 
                 if contenido_ia: resp = model.generate_content([full_prompt, *contenido_ia])
@@ -249,7 +288,6 @@ with col2:
     if st.session_state.resultado_analisis:
         texto = st.session_state.resultado_analisis
         
-        # Alerta visual de dispositivo
         if "⚠️ ALERTA" in texto or "MAL POSICIONADO" in texto:
             st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO MÉDICO</div>', unsafe_allow_html=True)
 
