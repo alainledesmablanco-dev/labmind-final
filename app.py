@@ -11,10 +11,10 @@ import re
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
-import extra_streamlit_components as stx  # NUEVA LIBRERÍA IMPRESCINDIBLE
+import extra_streamlit_components as stx
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 21.0 (Cookies)", page_icon="🍪", layout="wide")
+st.set_page_config(page_title="LabMind 22.0 (Fuentes)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -32,6 +32,10 @@ st.markdown("""
     .box-edu { background-color: #fff8e1; border: 1px solid #ffecb3; border-radius: 8px; padding: 15px; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .edu-title { color: #f57f17; font-weight: bold; font-size: 1.1em; display: flex; align-items: center; gap: 10px; }
 
+    /* FUENTES DISCRETAS */
+    .source-footer { font-size: 0.8em; color: #7f8c8d; margin-top: 15px; border-top: 1px solid #eee; padding-top: 5px; font-style: italic; }
+    .source-footer a { color: #7f8c8d; text-decoration: none; }
+
     .alerta-dispositivo { background-color: #fff3cd; padding: 10px; border-radius: 5px; border-left: 5px solid #ffc107; color: #856404; font-weight: bold; margin-bottom: 10px;}
     .privacidad-tag { background-color: #e8eaf6; color: #3f51b5; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
 
@@ -42,11 +46,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- INICIALIZAR GESTOR DE COOKIES ---
-# Esto debe ir ANTES de cualquier lógica de sesión
+# --- GESTOR COOKIES ---
 cookie_manager = stx.CookieManager()
 
-# --- GESTIÓN DE ESTADO ---
+# --- ESTADO ---
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
 if "api_key" not in st.session_state: st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state: st.session_state.resultado_analisis = None
@@ -55,43 +58,27 @@ if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
 if "area_herida" not in st.session_state: st.session_state.area_herida = None
 
-# --- LÓGICA DE LOGIN CON COOKIES ---
-# 1. Intentar leer la cookie
+# --- LOGIN (COOKIES) ---
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
-
 if not st.session_state.autenticado:
     if cookie_api_key:
-        # ¡COOKIE ENCONTRADA! Login automático
-        st.session_state.api_key = cookie_api_key
-        st.session_state.autenticado = True
-        st.rerun()
+        st.session_state.api_key = cookie_api_key; st.session_state.autenticado = True; st.rerun()
     else:
-        # NO HAY COOKIE -> MOSTRAR LOGIN
         col1, col2, col3 = st.columns([1,2,1])
         with col2:
             st.markdown("<br><br>", unsafe_allow_html=True)
             st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
             st.title("LabMind Acceso")
-            st.info("🔐 Introduce tu clave. Se guardará 30 días en este dispositivo.")
-            
+            st.info("🔐 Tu clave se guardará 30 días.")
             with st.form("login_form"):
-                usuario = st.text_input("Usuario (Opcional):", placeholder="Sanitario")
+                st.text_input("Usuario:", placeholder="Sanitario")
                 k_input = st.text_input("API Key:", type="password")
-                
-                if st.form_submit_button("🔓 ENTRAR Y RECORDAR"):
+                if st.form_submit_button("🔓 ENTRAR"):
                     if k_input:
-                        # GUARDAR COOKIE (Expira en 30 días)
                         expires = datetime.datetime.now() + datetime.timedelta(days=30)
                         cookie_manager.set("labmind_secret_key", k_input, expires_at=expires)
-                        
-                        # Actualizar estado
-                        st.session_state.api_key = k_input
-                        st.session_state.autenticado = True
-                        time.sleep(1) # Dar tiempo a que la cookie se asiente
-                        st.rerun()
-                    else:
-                        st.error("Introduce la API Key")
-        st.stop() # Detener app aquí si no está logueado
+                        st.session_state.api_key = k_input; st.session_state.autenticado = True; time.sleep(1); st.rerun()
+        st.stop()
 
 # ==========================================
 #      FUNCIONES AUXILIARES
@@ -104,7 +91,6 @@ def create_pdf(texto_analisis):
     
     pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
     pdf.cell(0,10,f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",0,1); pdf.ln(5)
-    
     clean = texto_analisis.replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
     pdf.multi_cell(0,5, clean.encode('latin-1','replace').decode('latin-1'))
     return pdf.output(dest='S').encode('latin-1')
@@ -113,7 +99,7 @@ def extraer_datos_grafica(txt):
     match = re.search(r'GRÁFICA_DATA: ({.*?})', txt)
     return eval(match.group(1)) if match else None
 
-# --- OPENCV FUNCIONES ---
+# --- OPENCV ---
 def anonymize_face(pil_image):
     img_np = np.array(pil_image.convert('RGB'))
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -171,17 +157,32 @@ def medir_herida(pil_image):
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
     
-    # BOTÓN DE SALIR REAL (BORRA LA COOKIE)
-    if st.button("🔒 Cerrar Sesión y Borrar Clave"):
+    # SALIR (Borra cookie)
+    if st.button("🔒 Cerrar Sesión"):
         cookie_manager.delete("labmind_secret_key")
-        st.session_state.autenticado = False
-        st.rerun()
+        st.session_state.autenticado = False; st.rerun()
 
     st.divider()
-    if st.file_uploader("📚 Protocolo (PDF)", type="pdf"): st.success("✅ Protocolo")
+    
+    # PROTOCOLO (PDF o FOTO) - OPCIONAL
+    proto_file = st.file_uploader("📚 Protocolo (PDF/Foto)", type=["pdf", "jpg", "png"], help="Sube una guía clínica (foto o PDF) para que la IA la siga.")
+    proto_content = [] # Lista para mandar a Gemini (si es img)
+    proto_text = ""    # Texto para mandar a Gemini (si es pdf)
+    
+    if proto_file:
+        st.success("✅ Protocolo Cargado")
+        if proto_file.type == "application/pdf":
+            try:
+                pdf_reader = pypdf.PdfReader(proto_file)
+                for page in pdf_reader.pages: proto_text += page.extract_text() or ""
+            except: pass
+        else:
+            # Es imagen, la abrimos para mandarla luego
+            proto_img = Image.open(proto_file)
+            proto_content.append(proto_img)
 
 # --- MAIN ---
-st.title("🩺 LabMind 21.0")
+st.title("🩺 LabMind 22.0")
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
@@ -219,18 +220,25 @@ with col1:
 with col2:
     st.subheader("2. Análisis Clínico")
     
-    if (archivos or audio) and st.button("🚀 ANALIZAR (Gemini 3 Preview)", type="primary"):
+    if (archivos or audio) and st.button("🚀 ANALIZAR (Preview)", type="primary"):
         st.session_state.log_privacidad = []; st.session_state.area_herida = None
         
-        with st.spinner("🧠 Analizando..."):
+        with st.spinner("🧠 Consultando Fuentes y Analizando..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
-                # MODELO RESTAURADO A TU PREFERENCIA
+                # MODELO SOLICITADO
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
                 
                 con = []; txt_c = ""
+                
+                # 1. AÑADIR PROTOCOLO VISUAL (SI EXISTE) AL PRINCIPIO
+                if proto_content:
+                    con.extend(proto_content)
+                    txt_c += "\n[IMAGEN DE PROTOCOLO ADJUNTA - USAR COMO REFERENCIA]\n"
+                
                 if audio: con.append(genai.upload_file(audio, mime_type="audio/wav")); txt_c += "\n[AUDIO]\n"
                 
+                # 2. PROCESAR ARCHIVOS DEL PACIENTE
                 for t, a in archivos:
                     if t == "video":
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf: tf.write(a.read()); tp = tf.name
@@ -257,11 +265,15 @@ with col2:
 
                 dato_med = f"ÁREA HERIDA: {st.session_state.area_herida}" if st.session_state.area_herida else ""
                 
+                # PROMPT CON SOLICITUD DE FUENTES
                 prompt = f"""
                 Rol: Enfermera Especialista (APN). Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
                 {dato_med}
                 { "VERIFICA TUBOS/VÍAS." if activar_detector else "" }
                 MATERIAL: {txt_c}
+                {f"PROTOCOLO (Texto): {proto_text[:10000]}" if proto_text else ""}
+                
+                INSTRUCCIÓN CLAVE: Justifica tus recomendaciones basándote en Guías Clínicas (GNEAUPP, GINA, GOLD, ESC, etc.) o bibliografía fiable.
                 
                 OUTPUT FORMAT (STRICT):
                 ---
@@ -273,12 +285,15 @@ with col2:
                 * **🧴 MATERIAL:** [Lista]
                 ---
                 ### 🎓 FORMACIÓN FLASH
-                * **Patología:** [Nombre Técnico]
-                * **Perlas Clínicas:** [3 puntos clave]
-                * **Tip Experto:** [Consejo avanzado]
+                * **Patología:** [Nombre]
+                * **Perlas Clínicas:** [Puntos clave]
+                * **Tip Experto:** [Consejo]
                 ---
                 ### 📝 DETALLE
-                [Resto del análisis]
+                [Análisis completo]
+
+                ### 🔗 FUENTES
+                [Pon aquí 1 o 2 links o referencias cortas y discretas. Ej: "Fuente: Guía GNEAUPP 2022", "Fuente: Uptodate - Atrial Fibrillation"]
                 """
                 
                 resp = model.generate_content([prompt, *con] if con else prompt)
@@ -292,8 +307,8 @@ with col2:
 
     # RENDERIZADO
     if st.session_state.resultado_analisis:
-        if activar_medicion and con and isinstance(con[0], Image.Image):
-             with st.expander("📸 Imagen Procesada", expanded=True): st.image(con[0], caption="Análisis Visión", use_container_width=True)
+        if activar_medicion and con and isinstance(con[-1], Image.Image): # Mostrar última img procesada
+             with st.expander("📸 Imagen Procesada", expanded=True): st.image(con[-1], caption="Análisis Visión", use_container_width=True)
         if st.session_state.log_privacidad:
             with st.expander("ℹ️ Logs Sistema", expanded=False):
                  for log in st.session_state.log_privacidad: st.caption(f"✅ {log}")
@@ -303,10 +318,18 @@ with col2:
         
         parts = txt.split("---")
         
-        resumen_html = ""; educacion_html = ""; detalle_txt = ""
+        # PARSEO SECCIONES
+        resumen_html = ""; educacion_html = ""; detalle_txt = ""; fuentes_html = ""
+
         resumen_part = re.search(r'### ⚡ RESUMEN(.*?)---', txt, re.DOTALL)
         edu_part = re.search(r'### 🎓 FORMACIÓN FLASH(.*?)---', txt, re.DOTALL)
-        detalle_part = txt.split("---")[-1]
+        # Extraer detalle (todo lo que va despues de formacion hasta fuentes)
+        detalle_match = re.search(r'### 📝 DETALLE(.*?)### 🔗 FUENTES', txt, re.DOTALL)
+        if not detalle_match: 
+             # Fallback si no encuentra fuentes
+             detalle_match = re.search(r'### 📝 DETALLE(.*)', txt, re.DOTALL)
+        
+        fuentes_part = re.search(r'### 🔗 FUENTES(.*)', txt, re.DOTALL)
 
         if resumen_part:
             resumen_raw = resumen_part.group(1).strip()
@@ -326,7 +349,18 @@ with col2:
             edu_raw = edu_part.group(1).strip()
             st.markdown(f"""<div class="box-edu"><div class="edu-title">🎓 Academia al Vuelo</div><div style="color: #444; margin-top: 10px; font-style: italic;">{edu_raw.replace('*', '•')}</div></div>""", unsafe_allow_html=True)
 
-        st.markdown(detalle_part)
+        if detalle_match:
+            st.markdown("### 📝 Detalle")
+            st.markdown(detalle_match.group(1).strip())
+
+        # RENDERIZAR FUENTES DISCRETAS AL FINAL
+        if fuentes_part:
+            fuentes_raw = fuentes_part.group(1).strip()
+            st.markdown(f"""
+            <div class="source-footer">
+                📚 <b>Fuentes y Referencias:</b> {fuentes_raw}
+            </div>
+            """, unsafe_allow_html=True)
             
         st.divider()
         if st.session_state.pdf_bytes:
