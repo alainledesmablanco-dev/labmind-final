@@ -11,9 +11,9 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 13.1", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 14.0", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS (AQUÍ ESTÁ EL TRUCO DE TRADUCCIÓN) ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
@@ -21,31 +21,18 @@ st.markdown("""
     .alerta-dispositivo { background-color: #ffe6e6; padding: 10px; border-radius: 5px; border-left: 5px solid #ff4444; color: #cc0000; font-weight: bold; margin-bottom: 10px;}
     .login-box { max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 10px; background-color: #f8f9fa; border: 1px solid #ddd; text-align: center; }
 
-    /* --- TRADUCCIÓN FORZADA DEL UPLOADER (TRUCO CSS) --- */
-    [data-testid='stFileUploaderDropzone'] div div span {
-       display: none; /* Oculta el texto "Drag and drop..." */
-    }
+    /* --- TRADUCCIÓN DEL UPLOADER --- */
+    [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after {
-       content: "Arrastra y suelta archivos aquí"; /* Pone texto en Español */
-       font-size: 1rem;
-       font-weight: bold;
-       color: #444;
-       display: block;
+       content: "Arrastra y suelta archivos aquí";
+       font-size: 1rem; font-weight: bold; color: #444; display: block;
     }
-    [data-testid='stFileUploaderDropzone'] div div small {
-       display: none; /* Oculta "Limit 200MB..." */
-    }
+    [data-testid='stFileUploaderDropzone'] div div small { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::before {
-       content: "Límite: 200MB por archivo"; /* Pone límite en Español */
-       font-size: 0.8rem;
-       color: #888;
-       display: block;
-       margin-bottom: 5px;
+       content: "Límite: 200MB por archivo";
+       font-size: 0.8rem; color: #888; display: block; margin-bottom: 5px;
     }
-    /* Intentar cambiar botón Browse (puede variar según navegador) */
-    [data-testid='stFileUploaderDropzone'] button {
-       border-color: #0066cc;
-    }
+    [data-testid='stFileUploaderDropzone'] button { border-color: #0066cc; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -59,24 +46,30 @@ if "resultado_analisis" not in st.session_state:
 if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
 
-# --- PANTALLA DE LOGIN ---
+# --- PANTALLA DE LOGIN (MEJORADA PARA SAFARI) ---
 def mostrar_login():
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
         st.title("LabMind Acceso")
-        st.info("🔐 Tu navegador te pedirá FaceID/Huella para guardar esta clave.")
+        st.info("🔐 Login Seguro: Introduce un nombre cualquiera y tu clave para que el navegador la recuerde.")
         
-        clave_input = st.text_input("Introduce tu API Key:", type="password")
-        
-        if st.button("🔓 ENTRAR CON SEGURIDAD"):
-            if clave_input:
-                st.session_state.api_key = clave_input
-                st.session_state.autenticado = True
-                st.rerun()
-            else:
-                st.warning("⚠️ Introduce una clave válida")
+        # USAMOS UN FORMULARIO REAL PARA QUE EL NAVEGADOR DETECTE EL LOGIN
+        with st.form("login_form"):
+            # Campo Dummy para activar el gestor de contraseñas
+            usuario = st.text_input("Usuario (Opcional):", value="Sanitario", help="Solo sirve para que tu móvil guarde la contraseña.")
+            clave_input = st.text_input("API Key (Contraseña):", type="password")
+            
+            submit_button = st.form_submit_button("🔓 ENTRAR")
+            
+            if submit_button:
+                if clave_input:
+                    st.session_state.api_key = clave_input
+                    st.session_state.autenticado = True
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Por favor, pega la API Key.")
 
 if not st.session_state.autenticado:
     mostrar_login()
@@ -125,20 +118,8 @@ with st.sidebar:
 
     st.divider()
     
-    # CALCULADORA
-    with st.expander("🧮 Calculadora Renal", expanded=False):
-        c_creat = st.number_input("Creatinina", 0.0, 15.0, 1.0)
-        c_edad = st.number_input("Edad", 18, 120, 60)
-        c_sexo = st.selectbox("Sexo", ["Hombre", "Mujer"])
-        k = 0.7 if c_sexo == "Mujer" else 0.9
-        a = -0.329 if c_sexo == "Mujer" else -0.411
-        factor = 1.018 if c_sexo == "Mujer" else 1
-        try:
-            fg = 141 * (min(c_creat/k, 1)**a) * (max(c_creat/k, 1)**-1.209) * (0.993**c_edad) * factor
-            st.markdown(f"**FG:** `{fg:.1f}`")
-            contexto_calc = f"DATO: FG calculado (CKD-EPI) = {fg:.1f} mL/min."
-        except: contexto_calc = ""
-
+    # --- CALCULADORA ELIMINADA POR PETICIÓN ---
+    
     protocolo_pdf = st.file_uploader("📚 Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
@@ -151,7 +132,7 @@ with st.sidebar:
     contexto = st.selectbox("Contexto:", ["UCI", "Urgencias", "Hospitalización", "Domicilio"])
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 13.1")
+st.title("🩺 LabMind 14.0")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -252,7 +233,6 @@ with col2:
                 full_prompt = f"""
                 Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}.
                 Notas: "{notas}"
-                {contexto_calc}
                 
                 {prompt_especifico}
                 {prompt_detector}
