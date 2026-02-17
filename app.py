@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.2", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.3", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -23,20 +23,14 @@ st.markdown("""
 
     /* --- TRADUCCIÓN DEL UPLOADER --- */
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
-    [data-testid='stFileUploaderDropzone'] div div::after {
-       content: "Arrastra y suelta archivos aquí";
-       font-size: 1rem; font-weight: bold; color: #444; display: block;
-    }
+    [data-testid='stFileUploaderDropzone'] div div::after { content: "Arrastra y suelta archivos aquí"; font-size: 1rem; font-weight: bold; color: #444; display: block; }
     [data-testid='stFileUploaderDropzone'] div div small { display: none; }
-    [data-testid='stFileUploaderDropzone'] div div::before {
-       content: "Límite: 200MB por archivo";
-       font-size: 0.8rem; color: #888; display: block; margin-bottom: 5px;
-    }
+    [data-testid='stFileUploaderDropzone'] div div::before { content: "Límite: 200MB por archivo"; font-size: 0.8rem; color: #888; display: block; margin-bottom: 5px; }
     [data-testid='stFileUploaderDropzone'] button { border-color: #0066cc; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN ---
+# --- GESTIÓN DE SESIÓN Y AUTO-LOGIN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "api_key" not in st.session_state:
@@ -48,19 +42,33 @@ if "datos_grafica" not in st.session_state:
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
 
-# --- PANTALLA DE LOGIN ---
+# --- 1. COMPROBAR ENLACE MÁGICO (URL) ---
+# Si la clave viene en la URL, entramos directo sin preguntar
+try:
+    query_params = st.query_params
+    if "k" in query_params and not st.session_state.autenticado:
+        clave_url = query_params["k"]
+        if len(clave_url) > 10: # Validación básica
+            st.session_state.api_key = clave_url
+            st.session_state.autenticado = True
+            st.success("⚡ Auto-Login completado desde el enlace.")
+            time.sleep(0.5)
+            st.rerun()
+except:
+    pass
+
+# --- PANTALLA DE LOGIN (FALLBACK) ---
 def mostrar_login():
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
         st.title("LabMind Acceso")
-        st.info("🔐 Tu navegador recordará la clave si rellenas ambos campos.")
+        st.info("🔐 Introduce tu clave una vez. Dentro podrás crear un 'Acceso Directo' para no escribirla más.")
         
         with st.form("login_form"):
-            # CAMBIO: Quitamos el 'value="Sanitario"' para que el campo empiece vacío.
-            # Esto ayuda a Safari a detectar que debe rellenarlo él.
-            usuario = st.text_input("Usuario:", placeholder="Ej: Sanitario (Escribe algo para activar guardar)")
+            # TRUCO: Cambiar 'Usuario' por 'Email' a veces despierta a Safari
+            usuario = st.text_input("Email / Usuario:", placeholder="tu@email.com")
             clave_input = st.text_input("API Key:", type="password")
             submit_button = st.form_submit_button("🔓 ENTRAR")
             
@@ -85,20 +93,12 @@ def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self):
             self.set_font('Arial', 'B', 12)
-            self.cell(0, 10, 'LabMind - Informe IA', 0, 1, 'C')
-            self.ln(5)
+            self.cell(0, 10, 'LabMind - Informe IA', 0, 1, 'C'); self.ln(5)
         def footer(self):
-            self.set_y(-15)
-            self.set_font('Arial', 'I', 8)
-            self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
-            
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=10)
+            self.set_y(-15); self.set_font('Arial', 'I', 8); self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
+    pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
     fecha = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-    pdf.cell(0, 10, f"Fecha del Informe: {fecha}", 0, 1)
-    pdf.ln(5)
-    
+    pdf.cell(0, 10, f"Fecha del Informe: {fecha}", 0, 1); pdf.ln(5)
     texto_limpio = texto_analisis.replace('€', 'EUR').replace('’', "'").replace('“', '"').replace('”', '"')
     texto_encoded = texto_limpio.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(0, 5, texto_encoded)
@@ -114,10 +114,18 @@ def extraer_datos_grafica(texto):
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
-    st.caption("✅ Sesión Iniciada")
     
+    # --- BOTÓN DE ENLACE MÁGICO ---
+    if st.button("🔗 Crear Acceso Directo (Auto-Login)"):
+        st.query_params["k"] = st.session_state.api_key
+        st.success("✅ ¡Hecho! Ahora guarda ESTA página en Favoritos o Inicio.")
+        st.info("La próxima vez entrarás sin contraseña.")
+        time.sleep(2)
+    
+    st.divider()
     if st.button("🔒 Cerrar Sesión"):
         st.session_state.autenticado = False
+        st.query_params.clear() # Limpiar URL al salir
         st.rerun()
 
     st.divider()
@@ -132,7 +140,7 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 15.2")
+st.title("🩺 LabMind 15.3")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -143,14 +151,7 @@ with col1:
     with cabecera_col2:
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia (Geriatría)", "Urgencias", "UCI", "Domicilio"])
     
-    modo = st.radio("Modo:", [
-        "🩹 Heridas", 
-        "📊 Analíticas", 
-        "📈 ECG", 
-        "💊 Farmacia", 
-        "💀 RX / TAC / RMN (Patología + Disp)", 
-        "🧩 Integral"
-    ])
+    modo = st.radio("Modo:", ["🩹 Heridas", "📊 Analíticas", "📈 ECG", "💊 Farmacia", "💀 RX / TAC / RMN (Patología + Disp)", "🧩 Integral"])
     st.markdown("---")
     
     activar_detector = False
@@ -167,7 +168,7 @@ with col1:
         if modo == "🩹 Heridas":
             f1 = st.file_uploader("Subir Foto Actual", type=['jpg','png'], key="u1")
             f2 = st.file_uploader("Subir Foto Previa", type=['jpg','png'], key="u2")
-            if f1: archivos.append(("img", f1))
+            if f1: archivos.append(("img", f1)); 
             if f2: archivos.append(("img", f2))
         elif modo == "📈 ECG": 
             f = st.file_uploader("Subir Electro (Foto/PDF)", type=['jpg','png','pdf'], key="u3")
@@ -194,14 +195,10 @@ with col2:
             try:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
-                
-                contenido_ia = []
-                txt_contexto = ""
+                contenido_ia = []; txt_contexto = ""
                 
                 if audio:
-                     contenido_ia.append(genai.upload_file(audio, mime_type="audio/wav"))
-                     txt_contexto += "\n[AUDIO ADJUNTO]\n"
-
+                     contenido_ia.append(genai.upload_file(audio, mime_type="audio/wav")); txt_contexto += "\n[AUDIO ADJUNTO]\n"
                 for t, a in archivos:
                     if t == "video":
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
@@ -218,46 +215,26 @@ with col2:
 
                 instruccion_residencia = ""
                 if "Residencia" in contexto:
-                    instruccion_residencia = """
-                    CONTEXTO RESIDENCIA (GERIATRÍA):
-                    - Céntrate en cuidados de enfermería in situ.
-                    - Dispones de material de curas básico/avanzado.
-                    - NO solicites pruebas hospitalarias complejas salvo urgencia vital.
-                    """
-
-                prompt_detector = ""
-                prompt_especifico = ""
-                if modo == "📈 ECG":
-                    prompt_especifico = "ANÁLISIS ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
-                elif activar_detector:
-                    prompt_detector = "VERIFICA TUBOS/VÍAS: TET, SNG, CVC."
+                    instruccion_residencia = "CONTEXTO RESIDENCIA (GERIATRÍA): Céntrate en cuidados in situ. Dispones de material. NO pidas pruebas hospitalarias complejas salvo vital."
+                prompt_detector = ""; prompt_especifico = ""
+                if modo == "📈 ECG": prompt_especifico = "ANÁLISIS ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
+                elif activar_detector: prompt_detector = "VERIFICA TUBOS/VÍAS: TET, SNG, CVC."
 
                 full_prompt = f"""
-                Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}.
-                Notas: "{notas}"
-                
-                {instruccion_residencia}
-                {prompt_especifico}
-                {prompt_detector}
-
-                MATERIAL: {txt_contexto}
-                {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else ""}
-
-                INSTRUCCIONES:
-                1. DIAGNÓSTICO CLÍNICO PRINCIPAL.
-                2. SI ES IMAGEN: Describe hallazgos.
-                3. Anonimiza datos.
-                
+                Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
+                {instruccion_residencia} {prompt_especifico} {prompt_detector}
+                MATERIAL: {txt_contexto} {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else ""}
+                INSTRUCCIONES: 1. DIAGNÓSTICO. 2. IMAGEN: Hallazgos. 3. ANONIMIZA.
                 SALIDA (Usa "---"):
                 ---
                 ### ⚡ RESUMEN
                 * **👤 PACIENTE:** [Datos]
                 * **🚨 DIAGNÓSTICO:** [Principal]
-                * **🩹 ACCIÓN:** [Plan inmediato]
-                * **🧴 MATERIAL:** [LISTA ESQUEMÁTICA MATERIAL NECESARIO]
+                * **🩹 ACCIÓN:** [Inmediata]
+                * **🧴 MATERIAL:** [LISTA ESQUEMÁTICA]
                 ---
                 ### 📝 ANÁLISIS DETALLADO
-                [Desarrollo completo]
+                [Desarrollo]
                 """
                 
                 if contenido_ia: resp = model.generate_content([full_prompt, *contenido_ia])
@@ -271,35 +248,19 @@ with col2:
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RESULTADOS
     if st.session_state.resultado_analisis:
         texto = st.session_state.resultado_analisis
-        
         if "⚠️ ALERTA" in texto or "MAL POSICIONADO" in texto:
             st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO MÉDICO</div>', unsafe_allow_html=True)
-
         if st.session_state.datos_grafica:
-            data = st.session_state.datos_grafica
-            fig, ax = plt.subplots(figsize=(6,2))
-            ax.plot(list(data.keys()), list(data.values()), 'o-r')
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
-
+            data = st.session_state.datos_grafica; fig, ax = plt.subplots(figsize=(6,2))
+            ax.plot(list(data.keys()), list(data.values()), 'o-r'); ax.grid(True, alpha=0.3); st.pyplot(fig)
+        
         texto_limpio = texto.replace("GRÁFICA_DATA:", "").split("{'")[0]
         pts = texto_limpio.split("---")
         if len(pts) >= 3:
-            st.markdown(f'<div class="esquema-rapido">{pts[1]}</div>', unsafe_allow_html=True)
-            st.markdown(pts[2])
+            st.markdown(f'<div class="esquema-rapido">{pts[1]}</div>', unsafe_allow_html=True); st.markdown(pts[2])
         else: st.markdown(texto_limpio)
-        
         st.divider()
-        
         if st.session_state.pdf_bytes:
-            nombre_archivo = f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf"
-            st.download_button(
-                label="📥 DESCARGAR INFORME PDF",
-                data=st.session_state.pdf_bytes,
-                file_name=nombre_archivo,
-                mime="application/pdf",
-                key="btn_descarga_pdf"
-            )
+            st.download_button(label="📥 DESCARGAR INFORME PDF", data=st.session_state.pdf_bytes, file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf", mime="application/pdf", key="btn_descarga_pdf")
