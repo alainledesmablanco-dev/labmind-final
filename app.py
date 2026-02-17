@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 14.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 14.2", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -46,21 +46,18 @@ if "resultado_analisis" not in st.session_state:
 if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
 
-# --- PANTALLA DE LOGIN (MEJORADA PARA SAFARI) ---
+# --- PANTALLA DE LOGIN ---
 def mostrar_login():
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
         st.title("LabMind Acceso")
-        st.info("🔐 Login Seguro: Introduce un nombre cualquiera y tu clave para que el navegador la recuerde.")
+        st.info("🔐 Login Seguro: Introduce un nombre y tu clave.")
         
-        # USAMOS UN FORMULARIO REAL PARA QUE EL NAVEGADOR DETECTE EL LOGIN
         with st.form("login_form"):
-            # Campo Dummy para activar el gestor de contraseñas
-            usuario = st.text_input("Usuario (Opcional):", value="Sanitario", help="Solo sirve para que tu móvil guarde la contraseña.")
-            clave_input = st.text_input("API Key (Contraseña):", type="password")
-            
+            usuario = st.text_input("Usuario:", value="Sanitario")
+            clave_input = st.text_input("API Key:", type="password")
             submit_button = st.form_submit_button("🔓 ENTRAR")
             
             if submit_button:
@@ -69,7 +66,7 @@ def mostrar_login():
                     st.session_state.autenticado = True
                     st.rerun()
                 else:
-                    st.warning("⚠️ Por favor, pega la API Key.")
+                    st.warning("⚠️ Introduce la API Key.")
 
 if not st.session_state.autenticado:
     mostrar_login()
@@ -118,8 +115,6 @@ with st.sidebar:
 
     st.divider()
     
-    # --- CALCULADORA ELIMINADA POR PETICIÓN ---
-    
     protocolo_pdf = st.file_uploader("📚 Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
@@ -128,17 +123,29 @@ with st.sidebar:
             for page in pdf_reader.pages: texto_protocolo += page.extract_text() or ""
             st.success("✅ Protocolo Activo")
         except: pass
-
-    contexto = st.selectbox("Contexto:", ["UCI", "Urgencias", "Hospitalización", "Domicilio"])
+    
+    # EL CONTEXTO YA NO ESTÁ AQUÍ, SE HA MOVIDO AL CENTRO
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 14.0")
+st.title("🩺 LabMind 14.2")
 
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
-    st.subheader("1. Captura")
+    # --- CAMBIO IMPORTANTE: CABECERA DIVIDIDA ---
+    # Creamos dos sub-columnas dentro de la columna 1
+    # Izquierda: Título "1. Captura"
+    # Derecha: Selector de Contexto (Así no se olvida)
+    cabecera_col1, cabecera_col2 = st.columns([1, 1.5])
     
+    with cabecera_col1:
+        st.subheader("1. Captura")
+    
+    with cabecera_col2:
+        contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio"])
+    
+    # ---------------------------------------------
+
     modo = st.radio("Modo:", [
         "🩹 Heridas", 
         "📊 Analíticas", 
