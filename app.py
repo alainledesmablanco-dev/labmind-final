@@ -11,36 +11,67 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind Ultra", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 12.0", page_icon="🧬", layout="wide")
 
-# --- GESTIÓN DE ESTADO ---
+# --- ESTILOS CSS ---
+st.markdown("""
+<style>
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
+    .esquema-rapido { background-color: #e8f4ff; padding: 15px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
+    .alerta-dispositivo { background-color: #ffe6e6; padding: 10px; border-radius: 5px; border-left: 5px solid #ff4444; color: #cc0000; font-weight: bold; margin-bottom: 10px;}
+    .login-box { max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 10px; background-color: #f8f9fa; border: 1px solid #ddd; text-align: center; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- GESTIÓN DE SESIÓN (LOGIN) ---
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state:
     st.session_state.resultado_analisis = None
 if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
 
-# --- ESTILOS ---
-st.markdown("""
-<style>
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
-    .esquema-rapido { background-color: #e8f4ff; padding: 15px; border-radius: 10px; border-left: 5px solid #0066cc; margin-bottom: 20px; }
-    .segunda-opinion { background-color: #f0fff4; padding: 10px; border-radius: 5px; border-left: 5px solid #2ecc71; font-size: 0.9em; }
-    .calculadora-box { background-color: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
-</style>
-""", unsafe_allow_html=True)
+# --- PANTALLA DE LOGIN ---
+def mostrar_login():
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
+        st.title("LabMind Acceso")
+        st.info("🔐 Tu navegador te pedirá FaceID/Huella para guardar esta clave.")
+        
+        clave_input = st.text_input("Introduce tu API Key:", type="password")
+        
+        if st.button("🔓 ENTRAR CON SEGURIDAD"):
+            if clave_input:
+                st.session_state.api_key = clave_input
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.warning("⚠️ Introduce una clave válida")
 
-# --- FUNCIONES AUXILIARES (PDF & GRÁFICAS) ---
+# SI NO ESTÁ AUTENTICADO, MUESTRA LOGIN Y PARA
+if not st.session_state.autenticado:
+    mostrar_login()
+    st.stop()
+
+# ==========================================
+#      A PARTIR DE AQUÍ: APP PRINCIPAL
+# ==========================================
+
+# --- FUNCIONES AUXILIARES ---
 def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self):
             self.set_font('Arial', 'B', 12)
-            self.cell(0, 10, 'LabMind - Informe Clínico Avanzado', 0, 1, 'C')
+            self.cell(0, 10, 'LabMind - Informe Clínico IA', 0, 1, 'C')
             self.ln(5)
         def footer(self):
             self.set_y(-15)
             self.set_font('Arial', 'I', 8)
             self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'C')
-
     pdf = PDF()
     pdf.add_page()
     pdf.set_font("Arial", size=10)
@@ -52,60 +83,36 @@ def create_pdf(texto_analisis):
     return pdf.output(dest='S').encode('latin-1')
 
 def extraer_datos_grafica(texto):
-    """Intenta buscar un bloque JSON/Data oculto en la respuesta de la IA para graficar"""
-    # Buscamos patrón tipo: GRÁFICA: {Fecha: Valor, Fecha: Valor}
     match = re.search(r'GRÁFICA_DATA: ({.*?})', texto)
     if match:
-        try:
-            dict_str = match.group(1)
-            # Convertir string a dict de forma segura
-            data = eval(dict_str) 
-            return data
-        except:
-            return None
+        try: return eval(match.group(1))
+        except: return None
     return None
 
-# --- BARRA LATERAL (CONFIGURACIÓN + CALCULADORA REAL) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=80)
-    st.title("LabMind 11.0")
+    st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
+    st.caption("✅ Sesión Iniciada")
     
-    st.markdown("### 🔑 Acceso")
-    api_key = st.text_input("Pega tu API Key:", type="password")
-    
-    st.divider()
-    
-    # --- 🧮 CALCULADORA INTEGRADA (PYTHON REAL) ---
-    with st.expander("🧮 Calculadora Renal (Python)", expanded=True):
-        st.caption("Cálculo exacto CKD-EPI")
-        calc_creatinina = st.number_input("Creatinina (mg/dL)", 0.0, 15.0, 1.0, step=0.1)
-        calc_edad = st.number_input("Edad", 18, 120, 60)
-        calc_sexo = st.selectbox("Sexo", ["Hombre", "Mujer"])
-        
-        # Fórmula Matemática Real (CKD-EPI 2021)
-        k = 0.7 if calc_sexo == "Mujer" else 0.9
-        a = -0.329 if calc_sexo == "Mujer" else -0.411
-        factor_sexo = 1.018 if calc_sexo == "Mujer" else 1
-        
-        try:
-            fg_exacto = 141 * (min(calc_creatinina/k, 1)**a) * (max(calc_creatinina/k, 1)**-1.209) * (0.993**calc_edad) * factor_sexo
-            st.markdown(f"**FG Estimado:** `{fg_exacto:.1f} mL/min`")
-            
-            # Semáforo renal
-            if fg_exacto > 60: estado_renal = "✅ Función Normal"
-            elif fg_exacto > 30: estado_renal = "⚠️ Insuficiencia Moderada"
-            else: estado_renal = "🚨 Insuficiencia Grave"
-            st.caption(estado_renal)
-            
-            # Guardamos el dato para pasárselo a la IA
-            contexto_calculado = f"DATO CALCULADO POR PYTHON: El Filtrado Glomerular exacto (CKD-EPI) es {fg_exacto:.1f} mL/min/1.73m2 ({estado_renal})."
-        except:
-            contexto_calculado = ""
+    if st.button("🔒 Cerrar Sesión"):
+        st.session_state.autenticado = False
+        st.rerun()
 
     st.divider()
     
-    # Activar Segunda Opinión
-    modo_agente = st.checkbox("🤖 Activar Segunda Opinión (Doble chequeo)", value=True, help="Tarda el doble, pero un segundo 'Cerebro IA' revisa el diagnóstico.")
+    # CALCULADORA
+    with st.expander("🧮 Calculadora Renal", expanded=False):
+        c_creat = st.number_input("Creatinina", 0.0, 15.0, 1.0)
+        c_edad = st.number_input("Edad", 18, 120, 60)
+        c_sexo = st.selectbox("Sexo", ["Hombre", "Mujer"])
+        k = 0.7 if c_sexo == "Mujer" else 0.9
+        a = -0.329 if c_sexo == "Mujer" else -0.411
+        factor = 1.018 if c_sexo == "Mujer" else 1
+        try:
+            fg = 141 * (min(c_creat/k, 1)**a) * (max(c_creat/k, 1)**-1.209) * (0.993**c_edad) * factor
+            st.markdown(f"**FG:** `{fg:.1f}`")
+            contexto_calc = f"DATO: FG calculado (CKD-EPI) = {fg:.1f} mL/min."
+        except: contexto_calc = ""
 
     protocolo_pdf = st.file_uploader("📚 Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
@@ -114,202 +121,151 @@ with st.sidebar:
             pdf_reader = pypdf.PdfReader(protocolo_pdf)
             for page in pdf_reader.pages: texto_protocolo += page.extract_text() or ""
             st.success("✅ Protocolo Activo")
-        except: st.error("Error PDF")
+        except: pass
 
-    contexto = st.selectbox("Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio", "Consulta"])
+    contexto = st.selectbox("Contexto:", ["UCI", "Urgencias", "Hospitalización", "Domicilio"])
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 Estación Clínica Inteligente")
+st.title("🩺 LabMind 12.0")
 
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
-    st.subheader("1. Captura de Datos")
+    st.subheader("1. Captura")
     
-    # --- NUEVO MODO FARMACIA ---
-    modo = st.radio("Modo:", [
-        "🩹 Heridas", 
-        "📊 Analíticas (Serie)", 
-        "💊 Farmacia/Interacciones",
-        "💀 TAC/RMN/ECG", 
-        "🧩 Integral"
-    ])
+    modo = st.radio("Modo:", ["🩹 Heridas", "📊 Analíticas", "💊 Farmacia", "💀 RX/TAC (Detector Dispositivos)", "🧩 Integral"])
     st.markdown("---")
     
-    opciones_fuente = ["📁 Subir o Grabar (Móvil)", "📸 Cámara Web (Solo Fotos)"]
-    if modo in ["💀 TAC/RMN/ECG", "🧩 Integral"]:
-        st.info("💡 Soporte de VÍDEO activo.")
-    
-    fuente_imagen = st.radio("Método de entrada:", opciones_fuente, horizontal=True)
-    
-    archivos_procesar = [] 
+    # CHECKBOX DETECTOR (Solo visible en modo imagen)
+    activar_detector = False
+    if modo == "💀 RX/TAC (Detector Dispositivos)" or modo == "🧩 Integral":
+        activar_detector = st.checkbox("🕵️ Activar Detector de Tubos/Vías", value=True, help="Analiza posición de SNG, Tubo ET y Catéteres.")
 
-    # --- INPUTS ---
-    if fuente_imagen == "📸 Cámara Web (Solo Fotos)":
-        foto_camara = st.camera_input("Hacer foto")
-        if foto_camara: archivos_procesar.append(("foto_camara", foto_camara))
+    fuente = st.radio("Entrada:", ["📁 Archivo/Grabar", "📸 WebCam"], horizontal=True)
+    archivos = []
+    
+    # LOGICA DE ARCHIVOS
+    if fuente == "📸 WebCam":
+        foto = st.camera_input("Foto")
+        if foto: archivos.append(("cam", foto))
     else:
         if modo == "🩹 Heridas":
-            st.info("📸 Foto Actual + Previa")
-            f_actual = st.file_uploader("FOTO ACTUAL", type=['jpg', 'png', 'jpeg'])
-            f_previa = st.file_uploader("FOTO PREVIA", type=['jpg', 'png', 'jpeg'])
-            if f_actual: archivos_procesar.append(("img_actual", f_actual))
-            if f_previa: archivos_procesar.append(("img_previa", f_previa))
-
-        elif modo == "📊 Analíticas (Serie)":
-            st.info("📈 Sube VARIAS analíticas para ver la GRÁFICA evolutiva.")
-            files = st.file_uploader("Informes:", type=['pdf', 'jpg', 'png'], accept_multiple_files=True)
-            if files:
-                for f in files: archivos_procesar.append(("doc", f))
-        
-        elif modo == "💊 Farmacia/Interacciones":
-            st.info("💊 Sube foto de la caja, blister u hoja de tratamiento.")
-            f = st.file_uploader("Foto Medicación:", type=['jpg', 'png', 'jpeg', 'pdf'])
-            if f: archivos_procesar.append(("farmacia", f))
-        
-        elif modo == "💀 TAC/RMN/ECG":
-            f = st.file_uploader("Imagen o VÍDEO:", type=['jpg', 'png', 'jpeg', 'mp4', 'mov'])
-            if f: 
-                if f.type in ['video/mp4', 'video/quicktime']: archivos_procesar.append(("video", f))
-                else: archivos_procesar.append(("unico", f))
-
-        elif modo == "🧩 Integral":
-            st.info("🗂️ Todo mezclado: Informes, Fotos y VÍDEOS.")
-            files = st.file_uploader("Archivos del caso:", type=['pdf', 'jpg', 'png', 'jpeg', 'mp4', 'mov'], accept_multiple_files=True)
-            if files:
-                for f in files:
-                    if f.type in ['video/mp4', 'video/quicktime']: archivos_procesar.append(("video", f))
-                    else: archivos_procesar.append(("doc_mix", f))
+            f1 = st.file_uploader("Actual", type=['jpg','png'])
+            f2 = st.file_uploader("Previa", type=['jpg','png'])
+            if f1: archivos.append(("img", f1))
+            if f2: archivos.append(("img", f2))
+        elif modo == "💀 RX/TAC (Detector Dispositivos)":
+            f = st.file_uploader("Rx/TAC/Video:", type=['jpg','png','mp4','mov'])
+            if f:
+                if f.type in ['video/mp4','video/quicktime']: archivos.append(("video", f))
+                else: archivos.append(("img", f))
+        else:
+            fs = st.file_uploader("Docs/Fotos:", accept_multiple_files=True)
+            if fs: 
+                for f in fs: archivos.append(("doc", f))
 
     st.markdown("---")
-    
-    st.write("🎙️ **Dictado de Voz:**")
-    audio_nota = st.audio_input("Grabar notas")
-    notas_texto = st.text_area("✍️ Texto:", height=80)
+    audio = st.audio_input("🎙️ Notas de Voz")
+    notas = st.text_area("Texto:", height=80)
 
 with col2:
-    st.subheader("2. Análisis & Validación")
+    st.subheader("2. Análisis Clínico")
     
-    if (archivos_procesar or audio_nota) and st.button("🚀 ANALIZAR (AGENTE CLÍNICO)", type="primary"):
-        if not api_key:
-            st.warning("⚠️ Falta API Key.")
-        else:
-            with st.spinner("🧠 Fase 1: Análisis Inicial..."):
-                try:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("models/gemini-3-flash-preview")
-                    safety_settings = [{"category": c, "threshold": "BLOCK_NONE"} for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-                    
-                    contenido_ia = []
-                    contexto_archivos = ""
-                    
-                    if audio_nota:
-                         contenido_ia.append(genai.upload_file(audio_nota, mime_type="audio/wav"))
-                         contexto_archivos += "\n[AUDIO: NOTA DE VOZ ADJUNTA]\n"
+    if (archivos or audio) and st.button("🚀 ANALIZAR", type="primary"):
+        with st.spinner("🧠 Procesando..."):
+            try:
+                genai.configure(api_key=st.session_state.api_key)
+                model = genai.GenerativeModel("models/gemini-3-flash-preview")
+                
+                # PREPARAR CONTENIDO
+                contenido_ia = []
+                txt_contexto = ""
+                
+                if audio:
+                     contenido_ia.append(genai.upload_file(audio, mime_type="audio/wav"))
+                     txt_contexto += "\n[AUDIO ADJUNTO]\n"
 
-                    for tipo, archivo in archivos_procesar:
-                        if tipo == "video":
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
-                                tmp_file.write(archivo.read()); tmp_path = tmp_file.name
-                            video_file = genai.upload_file(path=tmp_path)
-                            while video_file.state.name == "PROCESSING": time.sleep(1); video_file = genai.get_file(video_file.name)
-                            contenido_ia.append(video_file); contexto_archivos += f"\n[VÍDEO: {archivo.name}]\n"; os.remove(tmp_path)
-                        elif hasattr(archivo, 'type') and archivo.type == "application/pdf":
-                            pdf_reader = pypdf.PdfReader(archivo); texto_pdf = ""
-                            for page in pdf_reader.pages: texto_pdf += page.extract_text() or ""
-                            contexto_archivos += f"\n--- PDF ---\n{texto_pdf}\n"
-                        else:
-                            img = Image.open(archivo); contenido_ia.append(img); contexto_archivos += f"\n[IMAGEN ADJUNTA]\n"
+                for t, a in archivos:
+                    if t == "video":
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
+                            tf.write(a.read()); tpath = tf.name
+                        vf = genai.upload_file(path=tpath)
+                        while vf.state.name == "PROCESSING": time.sleep(1); vf = genai.get_file(vf.name)
+                        contenido_ia.append(vf); txt_contexto += "\n[VIDEO TAC/RMN]\n"; os.remove(tpath)
+                    elif hasattr(a, 'type') and a.type == "application/pdf":
+                        pdf_reader = pypdf.PdfReader(a); pdf_text = ""
+                        for p in pdf_reader.pages: pdf_text += p.extract_text()
+                        txt_contexto += f"\nPDF: {pdf_text}\n"
+                    else:
+                        img = Image.open(a); contenido_ia.append(img); txt_contexto += "\n[IMAGEN]\n"
 
-                    # --- PROMPT FASE 1: ANÁLISIS ---
-                    prompt_fase_1 = f"""
-                    Actúa como Experto Clínico Multidisciplinar.
-                    CONTEXTO: {contexto}. MODO: {modo}.
-                    NOTAS: "{notas_texto}"
-                    {contexto_calculado} (Este valor es EXACTO, úsalo).
-
-                    MATERIAL ADJUNTO:
-                    {contexto_archivos}
-                    {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else "USA EVIDENCIA."}
-
-                    INSTRUCCIONES CLAVE:
-                    1. Si es MODO FARMACIA: Cruza la medicación detectada en la foto con las patologías del paciente. Busca interacciones (ej: AINEs + Fallo Renal).
-                    2. Si es MODO SERIE: Extrae fechas y valores. Si detectas una evolución clara, GENERA AL FINAL DEL TEXTO EL SIGUIENTE FORMATO EXACTO: GRÁFICA_DATA: {{'Ene': 10, 'Feb': 12, 'Mar': 14}} (Solo con los valores numéricos principales).
-                    3. Anonimiza nombres.
-
-                    FORMATO SALIDA:
-                    ---
-                    ### ⚡ DIAGNÓSTICO
-                    * **👤 PACIENTE:** [Datos anonimizados].
-                    * **🚨 PROBLEMA:** [Principal].
-                    * **💊 ALERTA FARMACIA:** [Solo si hay riesgo].
-                    ---
-                    ### 📝 ANÁLISIS DETALLADO
-                    [Desarrollo completo].
+                # --- PROMPT CON DETECTOR DE DISPOSITIVOS ---
+                prompt_detector = ""
+                if activar_detector:
+                    prompt_detector = """
+                    🚨 PROTOCOLO DE DISPOSITIVOS MÉDICOS ACTIVO:
+                    Debes verificar OBLIGATORIAMENTE la posición de cualquier cuerpo extraño visible:
+                    1. Tubo Endotraqueal (TET): ¿Distancia a carina? ¿Selectivo en bronquio?
+                    2. Sonda Nasogástrica (SNG): ¿Punta en estómago o esófago? ¿Paso por hiato?
+                    3. Vías Centrales (CVC): ¿Punta en vena cava superior? ¿Signos de neumotórax?
+                    SI DETECTAS MALPOSICIÓN, INICIA LA RESPUESTA CON: "⚠️ ALERTA: DISPOSITIVO MAL POSICIONADO".
                     """
-                    
-                    # EJECUCIÓN FASE 1
-                    if contenido_ia: response_1 = model.generate_content([prompt_fase_1, *contenido_ia], safety_settings=safety_settings)
-                    else: response_1 = model.generate_content(prompt_fase_1, safety_settings=safety_settings)
-                    
-                    texto_final = response_1.text
 
-                    # --- FASE 2: SEGUNDA OPINIÓN (AGENTE CRÍTICO) ---
-                    if modo_agente:
-                        with st.spinner("🕵️ Fase 2: Agente Crítico revisando errores..."):
-                            prompt_critico = f"""
-                            Actúa como Supervisor Clínico Senior. Revisa este informe generado por una IA junior:
-                            
-                            "{texto_final}"
-                            
-                            TU TAREA:
-                            1. Busca errores clínicos, alucinaciones o incongruencias (ej: ¿Dice que hay edema pero la foto es normal?).
-                            2. Si todo está bien, déjalo igual.
-                            3. Si hay errores, CORRÍGELOS y reescribe el informe final mejorado.
-                            4. Mantén el formato con "---".
-                            """
-                            response_2 = model.generate_content(prompt_critico, safety_settings=safety_settings)
-                            texto_final = response_2.text
+                full_prompt = f"""
+                Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}.
+                Notas: "{notas}"
+                {contexto_calc}
+                
+                {prompt_detector}
 
-                    st.session_state.resultado_analisis = texto_final
-                    
-                    # Extraer datos gráfica si existen
-                    datos_grafica = extraer_datos_grafica(texto_final)
-                    st.session_state.datos_grafica = datos_grafica
+                MATERIAL: {txt_contexto}
+                {f"PROTOCOLO: {texto_protocolo[:15000]}" if texto_protocolo else ""}
 
-                except Exception as e:
-                    st.error("❌ Error:"); st.write(e)
+                INSTRUCCIONES:
+                1. Anonimiza al paciente.
+                2. Si es MODO FARMACIA: Busca interacciones.
+                3. Si es MODO SERIE: Busca datos para GRÁFICA_DATA: {{'Ene': 10, 'Feb': 12}}.
+                
+                SALIDA (Usa "---"):
+                ---
+                ### ⚡ RESUMEN
+                * **👤 PACIENTE:** [Datos]
+                * **🚨 DIAGNÓSTICO:** [Principal]
+                * **🩹 ACCIÓN:** [Plan]
+                ---
+                ### 📝 DETALLE
+                [Análisis completo]
+                """
+                
+                if contenido_ia: resp = model.generate_content([full_prompt, *contenido_ia])
+                else: resp = model.generate_content(full_prompt)
+                
+                st.session_state.resultado_analisis = resp.text
+                st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
 
-    # --- MOSTRAR RESULTADOS ---
+            except Exception as e: st.error(f"Error: {e}")
+
+    # RESULTADOS
     if st.session_state.resultado_analisis:
-        # 1. MOSTRAR GRÁFICA (Si se detectaron datos)
+        texto = st.session_state.resultado_analisis
+        
+        # Alerta visual de dispositivo
+        if "⚠️ ALERTA" in texto or "MAL POSICIONADO" in texto:
+            st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO MÉDICO</div>', unsafe_allow_html=True)
+
         if st.session_state.datos_grafica:
-            st.caption("📈 Tendencia Detectada Automáticamente")
             data = st.session_state.datos_grafica
-            fechas = list(data.keys())
-            valores = list(data.values())
-            
-            fig, ax = plt.subplots(figsize=(6, 2))
-            ax.plot(fechas, valores, marker='o', color='red', linestyle='-')
-            ax.set_title("Evolución Clínica")
+            fig, ax = plt.subplots(figsize=(6,2))
+            ax.plot(list(data.keys()), list(data.values()), 'o-r')
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
 
-        # 2. TEXTO DEL INFORME
-        texto_limpio = st.session_state.resultado_analisis.replace("GRÁFICA_DATA:", "").split("{'")[0] # Limpiar código técnico
+        texto_limpio = texto.replace("GRÁFICA_DATA:", "").split("{'")[0]
+        pts = texto_limpio.split("---")
+        if len(pts) >= 3:
+            st.markdown(f'<div class="esquema-rapido">{pts[1]}</div>', unsafe_allow_html=True)
+            st.markdown(pts[2])
+        else: st.markdown(texto_limpio)
         
-        partes = texto_limpio.split("---")
-        if len(partes) >= 3:
-            st.markdown(f'<div class="esquema-rapido">{partes[1]}</div>', unsafe_allow_html=True)
-            if modo_agente:
-                st.markdown('<div class="segunda-opinion">✅ Validado por Agente Supervisor</div>', unsafe_allow_html=True)
-            st.markdown(partes[2])
-        else:
-            st.markdown(texto_limpio)
-            
-        st.divider()
-        
-        # 3. EXPORTAR PDF
-        texto_pdf = texto_limpio.replace("*", "").replace("#", "").replace("---", "")
-        pdf_bytes = create_pdf(texto_pdf)
-        st.download_button("📥 DESCARGAR INFORME PDF", pdf_bytes, "Informe_LabMind.pdf", "application/pdf")
+        pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
+        st.download_button("📥 PDF", pdf_bytes, "Informe.pdf", "application/pdf")
