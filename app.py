@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 19.1 (Pro)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 20.0 (Gemini 3 Preview)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -169,7 +169,7 @@ with st.sidebar:
     if st.file_uploader("📚 Protocolo (PDF)", type="pdf"): st.success("✅ Protocolo")
 
 # --- MAIN ---
-st.title("🩺 LabMind 19.1")
+st.title("🩺 LabMind 20.0")
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
@@ -213,7 +213,10 @@ with col2:
         with st.spinner("🧠 Analizando..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
+                
+                # --- AQUÍ ESTÁ EL CAMBIO SOLICITADO ---
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
+                
                 con = []; txt_c = ""
                 if audio: con.append(genai.upload_file(audio, mime_type="audio/wav")); txt_c += "\n[AUDIO]\n"
                 
@@ -243,7 +246,7 @@ with col2:
 
                 dato_med = f"ÁREA HERIDA: {st.session_state.area_herida}" if st.session_state.area_herida else ""
                 
-                # PROMPT (SIN QR, PERO CON FORMACIÓN)
+                # PROMPT 
                 prompt = f"""
                 Rol: Enfermera Especialista (APN). Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
                 {dato_med}
@@ -272,7 +275,6 @@ with col2:
                 st.session_state.resultado_analisis = resp.text
                 st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
                 
-                # GENERAR PDF (SIN QR)
                 clean_txt = resp.text.replace("GRÁFICA_DATA:", "").split("{'")[0]
                 st.session_state.pdf_bytes = create_pdf(clean_txt.replace("*","").replace("#","").replace("---",""))
 
@@ -291,7 +293,6 @@ with col2:
         
         parts = txt.split("---")
         
-        # PARSEO
         resumen_html = ""; educacion_html = ""; detalle_txt = ""
 
         resumen_part = re.search(r'### ⚡ RESUMEN(.*?)---', txt, re.DOTALL)
