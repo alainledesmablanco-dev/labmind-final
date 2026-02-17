@@ -11,9 +11,10 @@ import re
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
+import extra_streamlit_components as stx  # NUEVA LIBRERÍA IMPRESCINDIBLE
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 20.0 (Gemini 3 Preview)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 21.0 (Cookies)", page_icon="🍪", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -28,18 +29,10 @@ st.markdown("""
     .box-ai { background-color: #f3e5f5; border-left: 6px solid #9c27b0; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #6a1b9a; }
     
     /* ACADEMIA FLASH */
-    .box-edu { 
-        background-color: #fff8e1; 
-        border: 1px solid #ffecb3;
-        border-radius: 8px; 
-        padding: 15px;
-        margin-top: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
+    .box-edu { background-color: #fff8e1; border: 1px solid #ffecb3; border-radius: 8px; padding: 15px; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .edu-title { color: #f57f17; font-weight: bold; font-size: 1.1em; display: flex; align-items: center; gap: 10px; }
 
     .alerta-dispositivo { background-color: #fff3cd; padding: 10px; border-radius: 5px; border-left: 5px solid #ffc107; color: #856404; font-weight: bold; margin-bottom: 10px;}
-    .btn-safari { display: block; width: 100%; padding: 10px; background-color: #2ecc71; color: white !important; text-align: center; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; border: 1px solid #27ae60; }
     .privacidad-tag { background-color: #e8eaf6; color: #3f51b5; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
 
     /* UPLOADER */
@@ -49,38 +42,56 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN ---
+# --- INICIALIZAR GESTOR DE COOKIES ---
+# Esto debe ir ANTES de cualquier lógica de sesión
+cookie_manager = stx.CookieManager()
+
+# --- GESTIÓN DE ESTADO ---
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
 if "api_key" not in st.session_state: st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state: st.session_state.resultado_analisis = None
 if "datos_grafica" not in st.session_state: st.session_state.datos_grafica = None
 if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
-if "mostrar_enlace_magico" not in st.session_state: st.session_state.mostrar_enlace_magico = False
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
 if "area_herida" not in st.session_state: st.session_state.area_herida = None
 
-# --- AUTO-LOGIN ---
-try:
-    if "k" in st.query_params and not st.session_state.autenticado:
-        clave_url = st.query_params["k"]
-        if len(clave_url) > 10: 
-            st.session_state.api_key = clave_url; st.session_state.autenticado = True; st.rerun()
-except: pass
+# --- LÓGICA DE LOGIN CON COOKIES ---
+# 1. Intentar leer la cookie
+cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
 
-# --- LOGIN ---
-def mostrar_login():
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
-        st.title("LabMind Acceso")
-        with st.form("login_form"):
-            st.text_input("Usuario:", placeholder="Sanitario")
-            k = st.text_input("API Key:", type="password")
-            if st.form_submit_button("🔓 ENTRAR"):
-                if k: st.session_state.api_key = k; st.session_state.autenticado = True; st.rerun()
-
-if not st.session_state.autenticado: mostrar_login(); st.stop()
+if not st.session_state.autenticado:
+    if cookie_api_key:
+        # ¡COOKIE ENCONTRADA! Login automático
+        st.session_state.api_key = cookie_api_key
+        st.session_state.autenticado = True
+        st.rerun()
+    else:
+        # NO HAY COOKIE -> MOSTRAR LOGIN
+        col1, col2, col3 = st.columns([1,2,1])
+        with col2:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
+            st.title("LabMind Acceso")
+            st.info("🔐 Introduce tu clave. Se guardará 30 días en este dispositivo.")
+            
+            with st.form("login_form"):
+                usuario = st.text_input("Usuario (Opcional):", placeholder="Sanitario")
+                k_input = st.text_input("API Key:", type="password")
+                
+                if st.form_submit_button("🔓 ENTRAR Y RECORDAR"):
+                    if k_input:
+                        # GUARDAR COOKIE (Expira en 30 días)
+                        expires = datetime.datetime.now() + datetime.timedelta(days=30)
+                        cookie_manager.set("labmind_secret_key", k_input, expires_at=expires)
+                        
+                        # Actualizar estado
+                        st.session_state.api_key = k_input
+                        st.session_state.autenticado = True
+                        time.sleep(1) # Dar tiempo a que la cookie se asiente
+                        st.rerun()
+                    else:
+                        st.error("Introduce la API Key")
+        st.stop() # Detener app aquí si no está logueado
 
 # ==========================================
 #      FUNCIONES AUXILIARES
@@ -102,7 +113,7 @@ def extraer_datos_grafica(txt):
     match = re.search(r'GRÁFICA_DATA: ({.*?})', txt)
     return eval(match.group(1)) if match else None
 
-# --- OPENCV FUNCIONES (PRIVACIDAD + MEDICIÓN) ---
+# --- OPENCV FUNCIONES ---
 def anonymize_face(pil_image):
     img_np = np.array(pil_image.convert('RGB'))
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -136,13 +147,12 @@ def medir_herida(pil_image):
             cv2.putText(img, "Ref 1 Euro", (x_c - 20, y_c), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             pixels_per_cm = (r_c * 2) / 2.325; scale_factor = (1 / pixels_per_cm) ** 2
             hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-            # Rangos rojo/amarillo
             m1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
             m2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
             m3 = cv2.inRange(hsv, np.array([10, 50, 50]), np.array([30, 255, 255]))
             mask_herida = m1 + m2 + m3
             mask_herida = cv2.morphologyEx(mask_herida, cv2.MORPH_OPEN, np.ones((5,5),np.uint8))
-            cv2.circle(mask_herida, (x_c, y_c), r_c + 10, 0, -1) # Borrar moneda de mascara
+            cv2.circle(mask_herida, (x_c, y_c), r_c + 10, 0, -1)
             cnts, _ = cv2.findContours(mask_herida, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             area_px = sum(cv2.contourArea(c) for c in cnts if cv2.contourArea(c) > 500)
             if area_px > 0:
@@ -160,16 +170,18 @@ def medir_herida(pil_image):
 # --- SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
-    if st.button("🔗 Generar Auto-Login"): st.session_state.mostrar_enlace_magico = True
-    if st.session_state.mostrar_enlace_magico:
-        st.markdown(f'''<a href="/?k={st.session_state.api_key}" target="_blank" class="btn-safari">🌍 ABRIR EN SAFARI</a>''', unsafe_allow_html=True)
-    st.divider()
-    if st.button("🔒 Salir"): st.session_state.autenticado = False; st.query_params.clear(); st.rerun()
+    
+    # BOTÓN DE SALIR REAL (BORRA LA COOKIE)
+    if st.button("🔒 Cerrar Sesión y Borrar Clave"):
+        cookie_manager.delete("labmind_secret_key")
+        st.session_state.autenticado = False
+        st.rerun()
+
     st.divider()
     if st.file_uploader("📚 Protocolo (PDF)", type="pdf"): st.success("✅ Protocolo")
 
 # --- MAIN ---
-st.title("🩺 LabMind 20.0")
+st.title("🩺 LabMind 21.0")
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
@@ -196,7 +208,7 @@ with col1:
             if f2:=st.file_uploader("Previa",type=['jpg','png'],key="h2"): archivos.append(("img",f2))
         elif "Dermatología" in modo:
             if f:=st.file_uploader("Lesión",type=['jpg','png','mp4','mov'],key="d1"): archivos.append(("video",f) if "video" in f.type else ("img",f))
-        else: # Generico
+        else:
             if fs:=st.file_uploader("Docs/Fotos",accept_multiple_files=True,key="g1"):
                 for f in fs: archivos.append(("doc",f))
 
@@ -207,14 +219,13 @@ with col1:
 with col2:
     st.subheader("2. Análisis Clínico")
     
-    if (archivos or audio) and st.button("🚀 ANALIZAR", type="primary"):
+    if (archivos or audio) and st.button("🚀 ANALIZAR (Gemini 3 Preview)", type="primary"):
         st.session_state.log_privacidad = []; st.session_state.area_herida = None
         
         with st.spinner("🧠 Analizando..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
-                
-                # --- AQUÍ ESTÁ EL CAMBIO SOLICITADO ---
+                # MODELO RESTAURADO A TU PREFERENCIA
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
                 
                 con = []; txt_c = ""
@@ -246,7 +257,6 @@ with col2:
 
                 dato_med = f"ÁREA HERIDA: {st.session_state.area_herida}" if st.session_state.area_herida else ""
                 
-                # PROMPT 
                 prompt = f"""
                 Rol: Enfermera Especialista (APN). Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
                 {dato_med}
@@ -264,8 +274,8 @@ with col2:
                 ---
                 ### 🎓 FORMACIÓN FLASH
                 * **Patología:** [Nombre Técnico]
-                * **Perlas Clínicas:** [3 puntos clave para aprender sobre esto]
-                * **Tip Experto:** [Un consejo avanzado]
+                * **Perlas Clínicas:** [3 puntos clave]
+                * **Tip Experto:** [Consejo avanzado]
                 ---
                 ### 📝 DETALLE
                 [Resto del análisis]
@@ -294,7 +304,6 @@ with col2:
         parts = txt.split("---")
         
         resumen_html = ""; educacion_html = ""; detalle_txt = ""
-
         resumen_part = re.search(r'### ⚡ RESUMEN(.*?)---', txt, re.DOTALL)
         edu_part = re.search(r'### 🎓 FORMACIÓN FLASH(.*?)---', txt, re.DOTALL)
         detalle_part = txt.split("---")[-1]
@@ -315,12 +324,7 @@ with col2:
         
         if edu_part:
             edu_raw = edu_part.group(1).strip()
-            st.markdown(f"""
-            <div class="box-edu">
-                <div class="edu-title">🎓 Academia al Vuelo</div>
-                <div style="color: #444; margin-top: 10px; font-style: italic;">{edu_raw.replace('*', '•')}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="box-edu"><div class="edu-title">🎓 Academia al Vuelo</div><div style="color: #444; margin-top: 10px; font-style: italic;">{edu_raw.replace('*', '•')}</div></div>""", unsafe_allow_html=True)
 
         st.markdown(detalle_part)
             
