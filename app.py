@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.3", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.4", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -30,7 +30,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN Y AUTO-LOGIN ---
+# --- GESTIÓN DE SESIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "api_key" not in st.session_state:
@@ -41,34 +41,33 @@ if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
+if "mostrar_enlace_magico" not in st.session_state:
+    st.session_state.mostrar_enlace_magico = False
 
 # --- 1. COMPROBAR ENLACE MÁGICO (URL) ---
-# Si la clave viene en la URL, entramos directo sin preguntar
 try:
     query_params = st.query_params
     if "k" in query_params and not st.session_state.autenticado:
         clave_url = query_params["k"]
-        if len(clave_url) > 10: # Validación básica
+        if len(clave_url) > 10: 
             st.session_state.api_key = clave_url
             st.session_state.autenticado = True
-            st.success("⚡ Auto-Login completado desde el enlace.")
+            st.success("⚡ Auto-Login correcto.")
             time.sleep(0.5)
             st.rerun()
-except:
-    pass
+except: pass
 
-# --- PANTALLA DE LOGIN (FALLBACK) ---
+# --- PANTALLA DE LOGIN ---
 def mostrar_login():
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
         st.title("LabMind Acceso")
-        st.info("🔐 Introduce tu clave una vez. Dentro podrás crear un 'Acceso Directo' para no escribirla más.")
+        st.info("🔐 Entra una vez con tu clave.")
         
         with st.form("login_form"):
-            # TRUCO: Cambiar 'Usuario' por 'Email' a veces despierta a Safari
-            usuario = st.text_input("Email / Usuario:", placeholder="tu@email.com")
+            usuario = st.text_input("Usuario:", placeholder="Sanitario")
             clave_input = st.text_input("API Key:", type="password")
             submit_button = st.form_submit_button("🔓 ENTRAR")
             
@@ -111,25 +110,27 @@ def extraer_datos_grafica(texto):
         except: return None
     return None
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (CON SOLUCIÓN AUTO-LOGIN) ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
     
     # --- BOTÓN DE ENLACE MÁGICO ---
-    if st.button("🔗 Crear Acceso Directo (Auto-Login)"):
-        st.query_params["k"] = st.session_state.api_key
-        st.success("✅ ¡Hecho! Ahora guarda ESTA página en Favoritos o Inicio.")
-        st.info("La próxima vez entrarás sin contraseña.")
-        time.sleep(2)
+    if st.button("🔗 Generar Auto-Login"):
+        st.session_state.mostrar_enlace_magico = True
+    
+    if st.session_state.mostrar_enlace_magico:
+        st.success("👇 Pulsa el enlace azul para recargar con la clave:")
+        # Enlace relativo que funciona en cualquier dominio
+        st.markdown(f"### [➡️ PULSA AQUÍ PARA ACTIVAR](/?k={st.session_state.api_key})")
+        st.caption("Cuando la página se recargue, añádela a Favoritos o Pantalla de Inicio y ya no te pedirá clave.")
     
     st.divider()
     if st.button("🔒 Cerrar Sesión"):
         st.session_state.autenticado = False
-        st.query_params.clear() # Limpiar URL al salir
+        st.query_params.clear()
         st.rerun()
 
     st.divider()
-    
     protocolo_pdf = st.file_uploader("📚 Protocolo (PDF)", type="pdf")
     texto_protocolo = ""
     if protocolo_pdf:
@@ -140,7 +141,7 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 15.3")
+st.title("🩺 LabMind 15.4")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -253,14 +254,4 @@ with col2:
         if "⚠️ ALERTA" in texto or "MAL POSICIONADO" in texto:
             st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO MÉDICO</div>', unsafe_allow_html=True)
         if st.session_state.datos_grafica:
-            data = st.session_state.datos_grafica; fig, ax = plt.subplots(figsize=(6,2))
-            ax.plot(list(data.keys()), list(data.values()), 'o-r'); ax.grid(True, alpha=0.3); st.pyplot(fig)
-        
-        texto_limpio = texto.replace("GRÁFICA_DATA:", "").split("{'")[0]
-        pts = texto_limpio.split("---")
-        if len(pts) >= 3:
-            st.markdown(f'<div class="esquema-rapido">{pts[1]}</div>', unsafe_allow_html=True); st.markdown(pts[2])
-        else: st.markdown(texto_limpio)
-        st.divider()
-        if st.session_state.pdf_bytes:
-            st.download_button(label="📥 DESCARGAR INFORME PDF", data=st.session_state.pdf_bytes, file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf", mime="application/pdf", key="btn_descarga_pdf")
+            data = st.session_
