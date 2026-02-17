@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 14.3", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.0", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -36,7 +36,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN ROBUSTA ---
+# --- GESTIÓN DE SESIÓN ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "api_key" not in st.session_state:
@@ -45,7 +45,6 @@ if "resultado_analisis" not in st.session_state:
     st.session_state.resultado_analisis = None
 if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
-# NUEVO: Guardamos el PDF generado para que no se pierda al recargar
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
 
@@ -96,8 +95,6 @@ def create_pdf(texto_analisis):
     fecha = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     pdf.cell(0, 10, f"Fecha: {fecha}", 0, 1)
     pdf.ln(5)
-    
-    # Limpieza de caracteres para evitar errores en FPDF
     texto_limpio = texto_analisis.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(0, 5, texto_limpio)
     return pdf.output(dest='S').encode('latin-1')
@@ -130,7 +127,7 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 14.3")
+st.title("🩺 LabMind 15.0")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -140,7 +137,8 @@ with col1:
     with cabecera_col1:
         st.subheader("1. Captura")
     with cabecera_col2:
-        contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio"])
+        # --- NUEVO: AÑADIDO RESIDENCIA ---
+        contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia (Geriatría)", "Urgencias", "UCI", "Domicilio"])
     
     modo = st.radio("Modo:", [
         "🩹 Heridas", 
@@ -219,11 +217,21 @@ with col2:
                     else:
                         img = Image.open(a); contenido_ia.append(img); txt_contexto += "\n[IMAGEN]\n"
 
+                # --- LÓGICA ESPECIAL PARA RESIDENCIA ---
+                instruccion_residencia = ""
+                if "Residencia" in contexto:
+                    instruccion_residencia = """
+                    IMPORTANTE (CONTEXTO RESIDENCIA):
+                    - Dispones de enfermería experta y material de curas (apósitos, cremas).
+                    - NO tienes recursos hospitalarios inmediatos: NO pidas cultivos, ni pruebas de imagen complejas salvo urgencia vital.
+                    - Tu objetivo es manejar la patología in situ siempre que sea seguro.
+                    """
+
                 prompt_detector = ""
                 prompt_especifico = ""
 
                 if modo == "📈 ECG":
-                    prompt_especifico = "ANÁLISIS ECG: Identifica Ritmo, Frecuencia, Eje, intervalo PR, QRS, segmento ST y ondas T. Busca bloqueos o isquemia."
+                    prompt_especifico = "ANÁLISIS ECG: Identifica Ritmo, Frecuencia, Eje, QRS, ST y T."
                 
                 elif activar_detector:
                     prompt_detector = """
@@ -237,6 +245,7 @@ with col2:
                 Actúa como Experto Clínico. Contexto: {contexto}. Modo: {modo}.
                 Notas: "{notas}"
                 
+                {instruccion_residencia}
                 {prompt_especifico}
                 {prompt_detector}
 
@@ -253,7 +262,8 @@ with col2:
                 ### ⚡ RESUMEN
                 * **👤 PACIENTE:** [Datos]
                 * **🚨 DIAGNÓSTICO:** [Principal]
-                * **🩹 ACCIÓN:** [Plan]
+                * **🩹 ACCIÓN:** [Plan inmediato]
+                * **🧴 MATERIAL:** [LISTA ESQUEMÁTICA DEL MATERIAL DE CURAS NECESARIO: Limpiador, Primario, Secundario]
                 ---
                 ### 📝 ANÁLISIS DETALLADO
                 [Desarrollo completo]
@@ -262,17 +272,15 @@ with col2:
                 if contenido_ia: resp = model.generate_content([full_prompt, *contenido_ia])
                 else: resp = model.generate_content(full_prompt)
                 
-                # GUARDAMOS EL TEXTO
                 st.session_state.resultado_analisis = resp.text
                 st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
                 
-                # --- NUEVO: GENERAR PDF AL INSTANTE PARA QUE ESTÉ LISTO ---
                 texto_limpio = resp.text.replace("GRÁFICA_DATA:", "").split("{'")[0]
                 st.session_state.pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RESULTADOS PERSISTENTES
+    # RESULTADOS
     if st.session_state.resultado_analisis:
         texto = st.session_state.resultado_analisis
         
@@ -295,10 +303,9 @@ with col2:
         
         st.divider()
         
-        # BOTÓN DE DESCARGA OPTIMIZADO (LEE DE MEMORIA)
         if st.session_state.pdf_bytes:
             st.download_button(
-                label="📥 DESCARGAR INFORME PDF (Clic para guardar)",
+                label="📥 DESCARGAR INFORME PDF",
                 data=st.session_state.pdf_bytes,
                 file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf",
                 mime="application/pdf"
