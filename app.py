@@ -11,56 +11,22 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.6", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 16.0", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS (AQUÍ ESTÁ LA MAGIA DE LOS COLORES) ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
     /* CAJAS DE RESUMEN */
-    .resumen-container {
-        font-family: sans-serif;
-    }
-    .box-diag { 
-        background-color: #ffebee; 
-        border-left: 6px solid #ef5350; 
-        padding: 12px; 
-        margin-bottom: 8px; 
-        border-radius: 4px;
-        color: #c62828;
-    }
-    .box-action { 
-        background-color: #e3f2fd; 
-        border-left: 6px solid #2196f3; 
-        padding: 12px; 
-        margin-bottom: 8px; 
-        border-radius: 4px;
-        color: #1565c0;
-    }
-    .box-mat { 
-        background-color: #e8f5e9; 
-        border-left: 6px solid #4caf50; 
-        padding: 12px; 
-        margin-bottom: 8px; 
-        border-radius: 4px;
-        color: #2e7d32;
-    }
-    .box-patient {
-        font-weight: bold;
-        color: #555;
-        margin-bottom: 10px;
-        display: block;
-    }
+    .resumen-container { font-family: sans-serif; }
+    .box-diag { background-color: #ffebee; border-left: 6px solid #ef5350; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #c62828; }
+    .box-action { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #1565c0; }
+    .box-mat { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 12px; margin-bottom: 8px; border-radius: 4px; color: #2e7d32; }
+    .box-patient { font-weight: bold; color: #555; margin-bottom: 10px; display: block; }
 
-    /* ALERTA DISPOSITIVO */
     .alerta-dispositivo { background-color: #fff3cd; padding: 10px; border-radius: 5px; border-left: 5px solid #ffc107; color: #856404; font-weight: bold; margin-bottom: 10px;}
-    
-    /* BOTÓN SAFARI */
-    .btn-safari {
-        display: block; width: 100%; padding: 10px; background-color: #2ecc71; color: white !important;
-        text-align: center; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; border: 1px solid #27ae60;
-    }
+    .btn-safari { display: block; width: 100%; padding: 10px; background-color: #2ecc71; color: white !important; text-align: center; border-radius: 8px; text-decoration: none; font-weight: bold; margin-top: 10px; border: 1px solid #27ae60; }
     .btn-safari:hover { background-color: #27ae60; }
 
     /* UPLOADER */
@@ -80,7 +46,7 @@ if "datos_grafica" not in st.session_state: st.session_state.datos_grafica = Non
 if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
 if "mostrar_enlace_magico" not in st.session_state: st.session_state.mostrar_enlace_magico = False
 
-# --- COMPROBAR ENLACE MÁGICO ---
+# --- AUTO-LOGIN ---
 try:
     if "k" in st.query_params and not st.session_state.autenticado:
         clave_url = st.query_params["k"]
@@ -140,7 +106,7 @@ with st.sidebar:
         except: pass
 
 # --- MAIN ---
-st.title("🩺 LabMind 15.6")
+st.title("🩺 LabMind 16.0")
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
@@ -148,7 +114,16 @@ with col1:
     with c1: st.subheader("1. Captura")
     with c2: contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia (Geriatría)", "Urgencias", "UCI", "Domicilio"])
     
-    modo = st.radio("Modo:", ["🩹 Heridas", "📊 Analíticas", "📈 ECG", "💊 Farmacia", "💀 RX / TAC / RMN", "🧩 Integral"])
+    # --- AÑADIDO DERMATOLOGÍA ---
+    modo = st.radio("Modo:", [
+        "🩹 Heridas (Curas)", 
+        "🧴 Dermatología (Piel)", 
+        "📊 Analíticas", 
+        "📈 ECG", 
+        "💊 Farmacia", 
+        "💀 RX / TAC / RMN", 
+        "🧩 Integral"
+    ])
     st.markdown("---")
     
     activar_detector = False
@@ -161,17 +136,26 @@ with col1:
     if fuente == "📸 WebCam":
         if f := st.camera_input("Foto"): archivos.append(("cam", f))
     else:
-        key_suf = modo[0] # Truco para keys unicas
+        # LÓGICA DE INPUTS SEGÚN MODO
         if "Heridas" in modo:
-            if f1:=st.file_uploader("Actual",type=['jpg','png'],key="h1"): archivos.append(("img",f1))
-            if f2:=st.file_uploader("Previa",type=['jpg','png'],key="h2"): archivos.append(("img",f2))
+            if f1:=st.file_uploader("Herida Actual",type=['jpg','png'],key="h1"): archivos.append(("img",f1))
+            if f2:=st.file_uploader("Herida Previa",type=['jpg','png'],key="h2"): archivos.append(("img",f2))
+        
+        elif "Dermatología" in modo:
+            st.info("📸 Sube foto o vídeo de la lesión cutánea (lunar, mancha, erupción).")
+            # AQUÍ PERMITIMOS VÍDEO TAMBIÉN
+            if f:=st.file_uploader("Lesión Piel",type=['jpg','png','mp4','mov'],key="d1"):
+                archivos.append(("video",f) if "video" in f.type else ("img",f))
+
         elif "ECG" in modo:
             if f:=st.file_uploader("ECG",type=['jpg','png','pdf'],key="e1"): archivos.append(("img",f))
+        
         elif "RX" in modo:
-            if f:=st.file_uploader("Img/Video",type=['jpg','mp4','mov'],key="r1"):
+            if f:=st.file_uploader("RX/TAC/Video",type=['jpg','mp4','mov'],key="r1"):
                 archivos.append(("video",f) if "video" in f.type else ("img",f))
-        else:
-            if fs:=st.file_uploader("Docs",accept_multiple_files=True,key="g1"):
+        
+        else: # Docs generales
+            if fs:=st.file_uploader("Documentos",accept_multiple_files=True,key="g1"):
                 for f in fs: archivos.append(("doc",f))
 
     st.markdown("---")
@@ -200,11 +184,27 @@ with col2:
                     else:
                         con.append(Image.open(a)); txt_c += "\n[IMG]\n"
 
+                # LÓGICA DEL PROMPT (CEREBRO)
                 res_ins = "CONTEXTO RESIDENCIA: Material in situ. NO pruebas complejas." if "Residencia" in contexto else ""
                 
+                prompt_especifico = ""
+                if "Dermatología" in modo:
+                    prompt_especifico = """
+                    MODO DERMATOLOGÍA:
+                    1. Analiza según regla ABCDE (Asimetría, Bordes, Color, Diámetro, Evolución) si es un lunar/mancha.
+                    2. Describe morfología primaria y secundaria (mácula, pápula, vesícula, costra).
+                    3. Sugiere tratamiento tópico o derivación si hay sospecha de malignidad.
+                    4. En 'MATERIAL', sugiere cremas/fármacos en lugar de apósitos.
+                    """
+                elif "Heridas" in modo:
+                    prompt_especifico = "MODO HERIDAS: Analiza lecho (TIME), bordes, exudado, piel perilesional. Sugiere APÓSITOS."
+                elif "ECG" in modo:
+                    prompt_especifico = "MODO ECG: Ritmo, Frecuencia, Eje, QRS, ST, T."
+
                 prompt = f"""
-                Rol: Enfermera Especialista (APN). Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
+                Rol: Enfermera Especialista (APN) y Apoyo Médico. Contexto: {contexto}. Modo: {modo}. Notas: "{notas}"
                 {res_ins}
+                {prompt_especifico}
                 { "VERIFICA TUBOS/VÍAS: TET, SNG, CVC." if activar_detector else "" }
                 MATERIAL: {txt_c}
                 {f"PROTOCOLO: {texto_protocolo[:10000]}" if texto_protocolo else ""}
@@ -215,7 +215,7 @@ with col2:
                 * **👤 PACIENTE:** [Datos]
                 * **🚨 DIAGNÓSTICO:** [Texto breve]
                 * **🩹 ACCIÓN:** [Texto breve]
-                * **🧴 MATERIAL:** [Texto breve]
+                * **🧴 MATERIAL:** [Lista de cremas, apósitos o fármacos]
                 ---
                 ### 📝 DETALLE
                 [Resto del análisis]
@@ -230,52 +230,29 @@ with col2:
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RENDERIZADO CON CAJAS DE COLORES
+    # RENDERIZADO VISUAL
     if st.session_state.resultado_analisis:
         txt = st.session_state.resultado_analisis
         
-        # 1. ALERTAS
         if "⚠️ ALERTA" in txt or "MAL POSICIONADO" in txt:
-            st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO</div>', unsafe_allow_html=True)
+            st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR DISPOSITIVO</div>', unsafe_allow_html=True)
         
-        # 2. GRÁFICA
         if st.session_state.datos_grafica:
             d = st.session_state.datos_grafica
             f, ax = plt.subplots(figsize=(6,2)); ax.plot(list(d.keys()), list(d.values()), 'o-r'); ax.grid(True, alpha=0.3); st.pyplot(f)
         
-        # 3. TEXTO FORMATEADO CON COLORES
         parts = txt.split("---")
         if len(parts) >= 3:
-            resumen_raw = parts[1]
-            detalle = parts[2]
-            
-            # PARSEO MANUAL PARA CREAR LAS CAJAS HTML
+            resumen_raw = parts[1]; detalle = parts[2]
             html_resumen = '<div class="resumen-container">'
-            
-            # Extraer líneas
-            lines = resumen_raw.strip().split('\n')
-            for line in lines:
+            for line in resumen_raw.strip().split('\n'):
                 line = line.replace('*', '').strip()
                 if not line: continue
-                
-                if "👤 PACIENTE" in line:
-                    clean_l = line.replace("👤 PACIENTE:", "").strip()
-                    html_resumen += f'<span class="box-patient">👤 {clean_l}</span>'
-                
-                elif "🚨 DIAGNÓSTICO" in line:
-                    clean_l = line.replace("🚨 DIAGNÓSTICO:", "").strip()
-                    html_resumen += f'<div class="box-diag"><b>🚨 DIAGNÓSTICO:</b><br>{clean_l}</div>'
-                
-                elif "🩹 ACCIÓN" in line:
-                    clean_l = line.replace("🩹 ACCIÓN:", "").strip()
-                    html_resumen += f'<div class="box-action"><b>🩹 ACCIÓN:</b><br>{clean_l}</div>'
-                
-                elif "🧴 MATERIAL" in line:
-                    clean_l = line.replace("🧴 MATERIAL:", "").strip()
-                    html_resumen += f'<div class="box-mat"><b>🧴 MATERIAL:</b><br>{clean_l}</div>'
-            
+                if "👤 PACIENTE" in line: html_resumen += f'<span class="box-patient">👤 {line.replace("👤 PACIENTE:", "").strip()}</span>'
+                elif "🚨 DIAGNÓSTICO" in line: html_resumen += f'<div class="box-diag"><b>🚨 DIAGNÓSTICO:</b><br>{line.replace("🚨 DIAGNÓSTICO:", "").strip()}</div>'
+                elif "🩹 ACCIÓN" in line: html_resumen += f'<div class="box-action"><b>🩹 ACCIÓN:</b><br>{line.replace("🩹 ACCIÓN:", "").strip()}</div>'
+                elif "🧴 MATERIAL" in line: html_resumen += f'<div class="box-mat"><b>🧴 MATERIAL:</b><br>{line.replace("🧴 MATERIAL:", "").strip()}</div>'
             html_resumen += '</div>'
-            
             st.markdown(html_resumen, unsafe_allow_html=True)
             st.markdown(detalle)
         else:
