@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 15.4", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 15.5", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -21,7 +21,23 @@ st.markdown("""
     .alerta-dispositivo { background-color: #ffe6e6; padding: 10px; border-radius: 5px; border-left: 5px solid #ff4444; color: #cc0000; font-weight: bold; margin-bottom: 10px;}
     .login-box { max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 10px; background-color: #f8f9fa; border: 1px solid #ddd; text-align: center; }
 
-    /* --- TRADUCCIÓN DEL UPLOADER --- */
+    /* ESTILO BOTÓN SAFARI */
+    .btn-safari {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        background-color: #2ecc71;
+        color: white !important;
+        text-align: center;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+        margin-top: 10px;
+        border: 1px solid #27ae60;
+    }
+    .btn-safari:hover { background-color: #27ae60; }
+
+    /* UPLOADER */
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "Arrastra y suelta archivos aquí"; font-size: 1rem; font-weight: bold; color: #444; display: block; }
     [data-testid='stFileUploaderDropzone'] div div small { display: none; }
@@ -110,7 +126,7 @@ def extraer_datos_grafica(texto):
         except: return None
     return None
 
-# --- BARRA LATERAL (CON SOLUCIÓN AUTO-LOGIN) ---
+# --- BARRA LATERAL (CON BOTÓN SALIR A SAFARI) ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=60)
     
@@ -119,10 +135,19 @@ with st.sidebar:
         st.session_state.mostrar_enlace_magico = True
     
     if st.session_state.mostrar_enlace_magico:
-        st.success("👇 Pulsa el enlace azul para recargar con la clave:")
-        # Enlace relativo que funciona en cualquier dominio
-        st.markdown(f"### [➡️ PULSA AQUÍ PARA ACTIVAR](/?k={st.session_state.api_key})")
-        st.caption("Cuando la página se recargue, añádela a Favoritos o Pantalla de Inicio y ya no te pedirá clave.")
+        st.success("👇 Pulsa el botón verde para abrir en Safari:")
+        
+        # URL RELATIVA con la clave
+        url_final = f"/?k={st.session_state.api_key}"
+        
+        # HTML LINK con target="_blank" para forzar nueva ventana (Safari)
+        st.markdown(f'''
+            <a href="{url_final}" target="_blank" class="btn-safari">
+                🌍 ABRIR EN SAFARI
+            </a>
+            ''', unsafe_allow_html=True)
+            
+        st.caption("Al abrirse en Safari, dale a 'Compartir' -> 'Añadir a pantalla de inicio'.")
     
     st.divider()
     if st.button("🔒 Cerrar Sesión"):
@@ -141,7 +166,7 @@ with st.sidebar:
         except: pass
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 15.4")
+st.title("🩺 LabMind 15.5")
 
 col1, col2 = st.columns([1.2, 2])
 
@@ -254,4 +279,14 @@ with col2:
         if "⚠️ ALERTA" in texto or "MAL POSICIONADO" in texto:
             st.markdown('<div class="alerta-dispositivo">🚨 ALERTA: VERIFICAR POSICIÓN DE DISPOSITIVO MÉDICO</div>', unsafe_allow_html=True)
         if st.session_state.datos_grafica:
-            data = st.session_
+            data = st.session_state.datos_grafica; fig, ax = plt.subplots(figsize=(6,2))
+            ax.plot(list(data.keys()), list(data.values()), 'o-r'); ax.grid(True, alpha=0.3); st.pyplot(fig)
+        
+        texto_limpio = texto.replace("GRÁFICA_DATA:", "").split("{'")[0]
+        pts = texto_limpio.split("---")
+        if len(pts) >= 3:
+            st.markdown(f'<div class="esquema-rapido">{pts[1]}</div>', unsafe_allow_html=True); st.markdown(pts[2])
+        else: st.markdown(texto_limpio)
+        st.divider()
+        if st.session_state.pdf_bytes:
+            st.download_button(label="📥 DESCARGAR INFORME PDF", data=st.session_state.pdf_bytes, file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf", mime="application/pdf", key="btn_descarga_pdf")
