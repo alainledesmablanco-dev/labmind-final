@@ -5,3 +5,4 @@ pypdf
 fpdf
 matplotlib
 opencv-python-headless
+extra-streamlit-components
