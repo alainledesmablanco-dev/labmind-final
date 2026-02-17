@@ -11,7 +11,7 @@ import re
 import matplotlib.pyplot as plt
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 14.2", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 14.3", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -36,7 +36,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTIÓN DE SESIÓN ---
+# --- GESTIÓN DE SESIÓN ROBUSTA ---
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "api_key" not in st.session_state:
@@ -45,6 +45,9 @@ if "resultado_analisis" not in st.session_state:
     st.session_state.resultado_analisis = None
 if "datos_grafica" not in st.session_state:
     st.session_state.datos_grafica = None
+# NUEVO: Guardamos el PDF generado para que no se pierda al recargar
+if "pdf_bytes" not in st.session_state:
+    st.session_state.pdf_bytes = None
 
 # --- PANTALLA DE LOGIN ---
 def mostrar_login():
@@ -93,6 +96,8 @@ def create_pdf(texto_analisis):
     fecha = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     pdf.cell(0, 10, f"Fecha: {fecha}", 0, 1)
     pdf.ln(5)
+    
+    # Limpieza de caracteres para evitar errores en FPDF
     texto_limpio = texto_analisis.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(0, 5, texto_limpio)
     return pdf.output(dest='S').encode('latin-1')
@@ -123,29 +128,20 @@ with st.sidebar:
             for page in pdf_reader.pages: texto_protocolo += page.extract_text() or ""
             st.success("✅ Protocolo Activo")
         except: pass
-    
-    # EL CONTEXTO YA NO ESTÁ AQUÍ, SE HA MOVIDO AL CENTRO
 
 # --- ZONA PRINCIPAL ---
-st.title("🩺 LabMind 14.2")
+st.title("🩺 LabMind 14.3")
 
 col1, col2 = st.columns([1.2, 2])
 
 with col1:
-    # --- CAMBIO IMPORTANTE: CABECERA DIVIDIDA ---
-    # Creamos dos sub-columnas dentro de la columna 1
-    # Izquierda: Título "1. Captura"
-    # Derecha: Selector de Contexto (Así no se olvida)
+    # CABECERA DIVIDIDA
     cabecera_col1, cabecera_col2 = st.columns([1, 1.5])
-    
     with cabecera_col1:
         st.subheader("1. Captura")
-    
     with cabecera_col2:
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Urgencias", "UCI", "Domicilio"])
     
-    # ---------------------------------------------
-
     modo = st.radio("Modo:", [
         "🩹 Heridas", 
         "📊 Analíticas", 
@@ -266,12 +262,17 @@ with col2:
                 if contenido_ia: resp = model.generate_content([full_prompt, *contenido_ia])
                 else: resp = model.generate_content(full_prompt)
                 
+                # GUARDAMOS EL TEXTO
                 st.session_state.resultado_analisis = resp.text
                 st.session_state.datos_grafica = extraer_datos_grafica(resp.text)
+                
+                # --- NUEVO: GENERAR PDF AL INSTANTE PARA QUE ESTÉ LISTO ---
+                texto_limpio = resp.text.replace("GRÁFICA_DATA:", "").split("{'")[0]
+                st.session_state.pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RESULTADOS
+    # RESULTADOS PERSISTENTES
     if st.session_state.resultado_analisis:
         texto = st.session_state.resultado_analisis
         
@@ -292,5 +293,13 @@ with col2:
             st.markdown(pts[2])
         else: st.markdown(texto_limpio)
         
-        pdf_bytes = create_pdf(texto_limpio.replace("*","").replace("#","").replace("---",""))
-        st.download_button("📥 PDF", pdf_bytes, "Informe.pdf", "application/pdf")
+        st.divider()
+        
+        # BOTÓN DE DESCARGA OPTIMIZADO (LEE DE MEMORIA)
+        if st.session_state.pdf_bytes:
+            st.download_button(
+                label="📥 DESCARGAR INFORME PDF (Clic para guardar)",
+                data=st.session_state.pdf_bytes,
+                file_name=f"Informe_LabMind_{datetime.datetime.now().strftime('%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
