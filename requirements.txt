@@ -6,3 +6,5 @@ fpdf
 matplotlib
 opencv-python-headless
 extra-streamlit-components
+streamlit-image-coordinates
+
