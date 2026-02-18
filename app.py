@@ -15,19 +15,20 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 48.0 (Audio Fix)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 50.0 (Derma Coin)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
-    /* BOTÓN BORRAR AUDIO (ROJO PEQUEÑO) */
+    /* BOTÓN BORRAR AUDIO (ESTILO MINIMALISTA) */
     div[data-testid="column"] .stButton button[kind="secondary"] {
         background-color: #ffebee;
         color: #c62828;
         border: 1px solid #ef9a9a;
-        width: 100%;
+        height: 52px; 
+        margin-top: 0px;
     }
 
     /* CAJAS DE RESUMEN */
@@ -186,7 +187,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 48.0")
+st.title("🩺 LabMind 50.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -253,7 +254,7 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras":
             st.info("🩹 **Modo Heridas**")
-            # --- ORDEN SOLICITADO: MONEDA LUEGO VISUAL ---
+            # --- ORDEN: MONEDA -> VISUAL ---
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
             
@@ -274,7 +275,10 @@ with col_center:
 
         elif modo == "🧴 Dermatología":
             st.info("🧴 **Modo Dermatología**")
+            # --- ORDEN IGUAL QUE HERIDAS ---
+            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+            
             with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
                 if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_prev"):
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
@@ -302,22 +306,20 @@ with col_center:
 
         st.markdown("---")
         
-        # --- AUDIO CON BOTÓN DE BORRADO ---
-        c_audio_1, c_audio_2 = st.columns([0.85, 0.15])
-        with c_audio_1:
-            audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder")
-        with c_audio_2:
-            st.write("")
-            st.write("")
-            # Botón tipo 'secondary' para que se vea más discreto o estilo custom
-            if st.button("❌", help="Borrar grabación", key="btn_clear_audio", type="secondary"):
-                # Truco para limpiar el componente: no hay API directa, pero el rerun recarga el estado si se manipula
-                # En Streamlit actual, st.audio_input mantiene estado. Reiniciamos la página o usamos un key dinámico.
-                # La forma más limpia es un rerun simple, el usuario tendrá que grabar de nuevo.
+        # --- AUDIO ---
+        c_del, c_audio, c_tag = st.columns([0.15, 0.45, 0.40])
+        with c_del:
+            st.write("") 
+            st.write("") 
+            if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
                 st.rerun()
+        with c_audio:
+            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
+        with c_tag:
+            st.write("") 
+            nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, alergias...")
-        nota_historial = st.text_input("🏷️ Etiqueta para Historial (Opcional):", placeholder="Ej: Paciente 304 - Revisión")
+        notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
 
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
@@ -362,7 +364,6 @@ with col_center:
                                 txt_rad_desc += "\n[VIDEO RADIOLÓGICO]"
                             else: con.append(Image.open(f)); txt_rad_desc += "\n[IMAGEN RX]"
 
-                    # Usamos la variable audio_val del widget
                     if audio_val: con.append(genai.upload_file(audio_val, mime_type="audio/wav"))
                     
                     img_display = None; img_thermal = None; img_biofilm = None; biofilm_detectado = False
@@ -376,7 +377,8 @@ with col_center:
                             con.append(vf); os.remove(tp)
                         else: 
                             img_pil = Image.open(a)
-                            if "Heridas" in modo and "prev" not in label: 
+                            # --- LÓGICA DE PROCESADO VISUAL ---
+                            if ("Heridas" in modo or "Dermatología" in modo) and "prev" not in label: 
                                 area, img_medida, coin = medir_herida_con_referencia(img_pil, usar_moneda)
                                 if area > 0: st.session_state.area_herida = area
                                 img_thermal = procesar_termografia(img_pil)
@@ -472,7 +474,6 @@ with col_center:
             
             st.markdown("---")
             
-            # --- CHAT PLEGADO POR DEFECTO ---
             with st.expander("💬 Abrir Asistente Clínico (Chat)", expanded=False):
                 for message in st.session_state.chat_messages:
                     with st.chat_message(message["role"]): st.markdown(message["content"])
@@ -518,7 +519,6 @@ with col_center:
 
 # --- COLUMNA 3: ESTADÍSTICAS ---
 with col_right:
-    # PLEGADO POR DEFECTO
     with st.expander("📈 Pronóstico (Ver Gráfica)", expanded=False):
         if len(st.session_state.historial_evolucion) > 0:
             df = pd.DataFrame(st.session_state.historial_evolucion)
