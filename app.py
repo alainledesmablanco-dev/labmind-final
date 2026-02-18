@@ -15,9 +15,9 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 57.0 (Ultra Compact)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 58.0 (Linear Layout)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS AGRESIVOS (COMPRESIÓN TOTAL) ---
+# --- ESTILOS CSS (COMPACTO) ---
 st.markdown("""
 <style>
     /* 1. MARGEN SUPERIOR MÍNIMO */
@@ -31,12 +31,8 @@ st.markdown("""
         gap: 0rem !important; 
         padding-bottom: 0px !important;
     }
-    div[data-testid="column"] {
-        gap: 0rem !important;
-    }
     
-    /* 3. FORZAR SUBIDA DE SELECTORES (TRUCO DEL MARGEN NEGATIVO) */
-    /* Esto hace que lo de abajo se pegue al selector de arriba */
+    /* 3. PEGAR SELECTORES */
     div[data-testid="stSelectbox"] {
         margin-bottom: -15px !important;
     }
@@ -198,7 +194,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 57.0")
+st.title("🩺 LabMind 58.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -207,8 +203,6 @@ with col_left:
     zonas_cuerpo = ["No especificada", "--- CABEZA ---", "Cara", "Cuello", "--- TRONCO ---", "Pecho", "Abdomen", "Espalda", "--- PELVIS ---", "Sacro/Glúteo", "Genitales", "--- EXTREMIDADES ---", "Brazo", "Mano", "Pierna", "Talón", "Pie"]
     seleccion_zona = st.selectbox("Zona anatómica:", zonas_cuerpo)
     st.session_state.punto_cuerpo = seleccion_zona
-    
-    # Línea borrada aquí también para compactar
     
     with st.expander("📚 Protocolo Unidad", expanded=False):
         proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
@@ -224,8 +218,7 @@ with col_center:
                      ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
-        # --- LÍNEA DIVISORIA ELIMINADA ---
-        # El CSS 'stSelectbox { margin-bottom: -15px }' hará que lo de abajo suba
+        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
@@ -292,18 +285,20 @@ with col_center:
                 for f in fs: archivos.append(("img",f))
         elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
 
-        # st.markdown('---') # ELIMINADA
+        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
-        # --- AUDIO COMPACTO ---
-        c_audio, c_tag = st.columns([0.6, 0.4])
-        with c_audio:
-            audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        with c_tag:
-            st.write("") 
-            nota_historial = st.text_input("🏷️ Etiqueta:", placeholder="Ej: Cama 304", label_visibility="collapsed")
-
+        # --- ORDEN VERTICAL MODIFICADO (AUDIO -> NOTAS -> ETIQUETA) ---
+        
+        # 1. AUDIO
+        audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
+        
+        # 2. NOTAS TEXTO
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
+        
+        # 3. ETIQUETA HISTORIAL
+        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
+        # BOTÓN ANALIZAR
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
