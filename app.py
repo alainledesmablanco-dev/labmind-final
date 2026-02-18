@@ -15,34 +15,34 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 56.1 (Ultra Tight)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 57.0 (Ultra Compact)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS AGRESIVOS (ZERO GAP + NEGATIVE MARGIN) ---
+# --- ESTILOS CSS AGRESIVOS (COMPRESIÓN TOTAL) ---
 st.markdown("""
 <style>
-    /* 1. MARGEN SUPERIOR GLOBAL MÍNIMO */
+    /* 1. MARGEN SUPERIOR MÍNIMO */
     .block-container {
         padding-top: 0.5rem !important;
         padding-bottom: 2rem !important;
     }
     
-    /* 2. COMPRESIÓN ENTRE WIDGETS */
+    /* 2. ESPACIO ENTRE WIDGETS = 0 */
     div[data-testid="stVerticalBlock"] > div {
-        gap: 0.1rem !important; /* Reduce espacio entre elementos verticales */
+        gap: 0rem !important; 
         padding-bottom: 0px !important;
     }
+    div[data-testid="column"] {
+        gap: 0rem !important;
+    }
     
-    /* 3. CLASE ESPECIAL PARA PEGAR ELEMENTOS */
-    .tight-space {
-        margin-top: -15px !important;
+    /* 3. FORZAR SUBIDA DE SELECTORES (TRUCO DEL MARGEN NEGATIVO) */
+    /* Esto hace que lo de abajo se pegue al selector de arriba */
+    div[data-testid="stSelectbox"] {
         margin-bottom: -15px !important;
-        padding: 0px !important;
-        height: 1px !important; 
-        background-color: #e0e0e0; /* Línea sutilísima */
     }
     
     /* ESTILOS GENERALES */
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; margin-top: 10px; }
     
     /* CAJAS RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
@@ -59,6 +59,7 @@ st.markdown("""
     
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     
+    [data-testid='stFileUploaderDropzone'] { padding: 5px !important; min-height: 60px; }
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
 </style>
@@ -197,7 +198,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 56.1")
+st.title("🩺 LabMind 57.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -207,7 +208,7 @@ with col_left:
     seleccion_zona = st.selectbox("Zona anatómica:", zonas_cuerpo)
     st.session_state.punto_cuerpo = seleccion_zona
     
-    st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True) 
+    # Línea borrada aquí también para compactar
     
     with st.expander("📚 Protocolo Unidad", expanded=False):
         proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
@@ -223,8 +224,8 @@ with col_center:
                      ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
-        # --- AQUÍ: LÍNEA "INVISIBLE" COMPACTA ---
-        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
+        # --- LÍNEA DIVISORIA ELIMINADA ---
+        # El CSS 'stSelectbox { margin-bottom: -15px }' hará que lo de abajo suba
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
@@ -291,7 +292,7 @@ with col_center:
                 for f in fs: archivos.append(("img",f))
         elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
 
-        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
+        # st.markdown('---') # ELIMINADA
         
         # --- AUDIO COMPACTO ---
         c_audio, c_tag = st.columns([0.6, 0.4])
