@@ -15,20 +15,30 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 50.0 (Derma Coin)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 52.0 (Max Space)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
+    /* 1. ELIMINAR MARGEN SUPERIOR (TITULO PEGADO ARRIBA) */
+    .block-container {
+        padding-top: 1rem !important; /* Reduce drásticamente el espacio arriba */
+        padding-bottom: 2rem !important;
+    }
+    
+    /* ESTILO GENERAL BOTONES */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
-    /* BOTÓN BORRAR AUDIO (ESTILO MINIMALISTA) */
+    /* 2. BOTÓN BORRAR AUDIO (PERFECTAMENTE ALINEADO A LA DERECHA) */
     div[data-testid="column"] .stButton button[kind="secondary"] {
         background-color: #ffebee;
         color: #c62828;
         border: 1px solid #ef9a9a;
-        height: 52px; 
-        margin-top: 0px;
+        height: 45px; 
+        width: 45px;
+        padding: 0px;
+        margin-top: 28px; /* Truco para bajarlo y alinearlo con el audio_input */
+        float: right;
     }
 
     /* CAJAS DE RESUMEN */
@@ -187,7 +197,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 50.0")
+st.title("🩺 LabMind 52.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -254,7 +264,6 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras":
             st.info("🩹 **Modo Heridas**")
-            # --- ORDEN: MONEDA -> VISUAL ---
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
             
@@ -275,7 +284,6 @@ with col_center:
 
         elif modo == "🧴 Dermatología":
             st.info("🧴 **Modo Dermatología**")
-            # --- ORDEN IGUAL QUE HERIDAS ---
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
             
@@ -306,16 +314,20 @@ with col_center:
 
         st.markdown("---")
         
-        # --- AUDIO ---
-        c_del, c_audio, c_tag = st.columns([0.15, 0.45, 0.40])
+        # --- BARRA DE HERRAMIENTAS DE AUDIO COMPACTA ---
+        c_audio, c_del, c_tag = st.columns([0.5, 0.1, 0.4])
+        
+        with c_audio:
+            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
+            
         with c_del:
-            st.write("") 
+            # BOTÓN BORRAR AUDIO (ROJO PEQUEÑO ALINEADO A LA DERECHA)
             st.write("") 
             if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
                 st.rerun()
-        with c_audio:
-            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
+        
         with c_tag:
+            st.write("") 
             st.write("") 
             nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
@@ -377,7 +389,6 @@ with col_center:
                             con.append(vf); os.remove(tp)
                         else: 
                             img_pil = Image.open(a)
-                            # --- LÓGICA DE PROCESADO VISUAL ---
                             if ("Heridas" in modo or "Dermatología" in modo) and "prev" not in label: 
                                 area, img_medida, coin = medir_herida_con_referencia(img_pil, usar_moneda)
                                 if area > 0: st.session_state.area_herida = area
@@ -483,6 +494,7 @@ with col_center:
                     with st.chat_message("user"): st.markdown(prompt)
                     with st.chat_message("assistant"):
                         try:
+                            # CHAT MODEL: GEMINI 3 FLASH PREVIEW
                             chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
                             ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
                             full_resp = chat_model.generate_content(ctx)
