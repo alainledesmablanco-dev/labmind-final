@@ -15,15 +15,26 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 55.0 (Layout Fix)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 55.1 (Compact UI)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS ---
+# --- ESTILOS CSS (ESPACIOS REDUCIDOS) ---
 st.markdown("""
 <style>
-    /* 1. ELIMINAR MARGEN SUPERIOR */
+    /* 1. ELIMINAR MARGEN SUPERIOR GLOBAL */
     .block-container {
         padding-top: 1rem !important;
         padding-bottom: 2rem !important;
+    }
+    
+    /* 2. REDUCIR ESPACIO DE LAS LÍNEAS DIVISORIAS (hr) */
+    hr {
+        margin-top: 0px !important;
+        margin-bottom: 10px !important;
+    }
+    
+    /* 3. REDUCIR ESPACIO ENTRE ELEMENTOS (gap) */
+    div[data-testid="column"] {
+        gap: 0.5rem !important;
     }
     
     /* ESTILO GENERAL BOTONES */
@@ -185,7 +196,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 55.0")
+st.title("🩺 LabMind 55.1")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -199,7 +210,7 @@ with col_left:
     seleccion_zona = st.selectbox("Zona anatómica:", zonas_cuerpo)
     st.session_state.punto_cuerpo = seleccion_zona
     
-    st.divider()
+    st.markdown("---") # LÍNEA COMPACTA
     
     with st.expander("📚 Protocolo de Unidad (Opcional)", expanded=False):
         st.caption("Sube el PDF/Foto de tu guía para que la IA la respete.")
@@ -222,7 +233,7 @@ with col_center:
                       "📂 Analizar Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
-        st.markdown("---")
+        st.markdown("---") # LÍNEA COMPACTA
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
@@ -255,7 +266,9 @@ with col_center:
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
-            st.info(f"{'🩹' if 'Heridas' in modo else '🧴'} **Modo {modo}**")
+            # Eliminamos st.info para ahorrar espacio vertical si prefieres
+            # st.info(f"{'🩹' if 'Heridas' in modo else '🧴'} **Modo {modo}**")
+            
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir", value=default_moneda, key="chk_moneda")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=default_visual, key="chk_visual")
             
@@ -315,18 +328,18 @@ with col_center:
             st.info("📂 **Modo Informes**")
             reports_files = st.file_uploader("PDFs/Fotos", accept_multiple_files=True, key="rep_docs")
 
-        st.markdown("---")
+        st.markdown("---") # LÍNEA COMPACTA
         
-        # --- 1. AUDIO ---
-        audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)", key="audio_recorder")
-        
-        # --- 2. NOTAS TEXTO ---
-        notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
-        
-        # --- 3. ETIQUETA HISTORIAL ---
-        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304")
+        # --- AUDIO LIMPIO Y COMPACTO ---
+        c_audio, c_tag = st.columns([0.6, 0.4])
+        with c_audio:
+            audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)", key="audio_recorder", label_visibility="collapsed")
+        with c_tag:
+            st.write("") 
+            nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
-        # BOTÓN ANALIZAR
+        notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
+
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
@@ -558,7 +571,7 @@ with col_right:
             pred = predecir_cierre()
             st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
         else:
-            st.caption("Añade datos en 'Ver Evolución' o analiza una herida.")
+            st.caption("Sin datos suficientes.")
 
 st.divider()
 if st.button("🔒 Salir"):
