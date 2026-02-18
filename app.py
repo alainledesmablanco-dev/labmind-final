@@ -12,10 +12,10 @@ import cv2
 import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
-import uuid # Necesario para IDs únicos en el historial
+import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 44.0 (History)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 45.0 (Smart Chat)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -37,11 +37,9 @@ st.markdown("""
     
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     
-    /* ESTILO HISTORIAL */
+    /* HISTORIAL */
     .history-card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
-    .history-meta { font-size: 0.8rem; color: #666; margin-bottom: 5px; }
-    .history-note { font-weight: bold; color: #333; margin-bottom: 5px; }
-
+    
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
 </style>
@@ -58,7 +56,6 @@ if "area_herida" not in st.session_state: st.session_state.area_herida = 0.0
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
 if "punto_cuerpo" not in st.session_state: st.session_state.punto_cuerpo = "No especificado"
 if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
-# --- NUEVO: HISTORIAL DE ANÁLISIS ---
 if "history_db" not in st.session_state: st.session_state.history_db = []
 
 # --- LOGIN ---
@@ -181,7 +178,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 44.0")
+st.title("🩺 LabMind 45.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -203,15 +200,10 @@ with col_left:
 
 # --- COLUMNA 2: NÚCLEO CENTRAL ---
 with col_center:
-    # --- PESTAÑAS PRINCIPALES: ANÁLISIS vs HISTORIAL ---
     tab_analisis, tab_historial = st.tabs(["🔍 Analizar Caso", "🗂️ Historial Guardado"])
     
-    # ----------------------------------------------
-    # PESTAÑA 1: ANALIZAR CASO (Lógica Principal)
-    # ----------------------------------------------
     with tab_analisis:
         st.subheader("1. Selección de Modo")
-        
         modo = st.selectbox("Especialidad:", 
                      ["🧩 Integral (Analizar Todo)",
                       "🩹 Heridas / Úlceras", 
@@ -220,18 +212,12 @@ with col_center:
                       "📈 ECG (Cardiología)", 
                       "💀 RX / TAC / RMN (Imagen)", 
                       "📂 Analizar Informes"])
-        
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
         st.markdown("---")
         
-        # --- UI DINÁMICA ---
         archivos = []
-        meds_files = None
-        labs_files = None
-        reports_files = None
-        ecg_files = None 
-        rad_files = None 
+        meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         usar_moneda = False
         
         if modo == "🧩 Integral (Analizar Todo)":
@@ -301,11 +287,8 @@ with col_center:
         st.markdown("---")
         audio = st.audio_input("🎙️ Notas de Voz")
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, alergias...")
-        
-        # NOTA PARA EL HISTORIAL
         nota_historial = st.text_input("🏷️ Etiqueta para Historial (Opcional):", placeholder="Ej: Paciente 304 - Revisión")
 
-        # --- BOTÓN DE ANÁLISIS ---
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
@@ -420,7 +403,6 @@ with col_center:
                             resp = model.generate_content([prompt, *con] if con else prompt)
                             st.session_state.resultado_analisis = resp.text
                             
-                            # --- GUARDADO AUTOMÁTICO EN HISTORIAL ---
                             new_entry = {
                                 "id": str(uuid.uuid4()),
                                 "date": datetime.datetime.now().strftime("%d/%m %H:%M"),
@@ -429,7 +411,6 @@ with col_center:
                                 "result": resp.text
                             }
                             st.session_state.history_db.append(new_entry)
-                            
                             break 
                         except Exception as e:
                             if "429" in str(e) and attempt < 2: time.sleep(5); continue
@@ -449,7 +430,6 @@ with col_center:
 
                 except Exception as e: st.error(f"Error: {e}")
 
-        # RENDERIZADO RESULTADOS EN LA PESTAÑA PRINCIPAL
         if st.session_state.resultado_analisis:
             txt = st.session_state.resultado_analisis.replace("```html", "").replace("```", "")
             sync_match = re.search(r'SYNC_ALERT: (.*)', txt)
@@ -457,7 +437,6 @@ with col_center:
                 st.markdown(f'<div class="sync-alert">⚠️ {sync_match.group(1)}</div>', unsafe_allow_html=True)
             st.markdown(txt, unsafe_allow_html=True)
             
-            # Chat
             st.markdown("---")
             st.subheader("💬 Asistente Clínico (Chat)")
             for message in st.session_state.chat_messages:
@@ -468,7 +447,8 @@ with col_center:
                 with st.chat_message("user"): st.markdown(prompt)
                 with st.chat_message("assistant"):
                     try:
-                        chat_model = genai.GenerativeModel("models/gemini-1.5-flash")
+                        # CHAT MODEL UPDATED TO 3 FLASH
+                        chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
                         ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
                         full_resp = chat_model.generate_content(ctx)
                         st.markdown(full_resp.text)
@@ -478,39 +458,24 @@ with col_center:
         if st.session_state.pdf_bytes:
             st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
 
-    # ----------------------------------------------
-    # PESTAÑA 2: HISTORIAL GUARDADO
-    # ----------------------------------------------
     with tab_historial:
-        st.subheader("🗂️ Historial de Análisis (Sesión)")
-        
+        st.subheader("🗂️ Historial de Análisis")
         if not st.session_state.history_db:
-            st.info("No hay análisis guardados en esta sesión.")
+            st.info("No hay análisis guardados.")
         else:
-            # CONTROLES DE BORRADO
-            col_del_all, col_spacer = st.columns([1, 4])
-            if col_del_all.button("🗑️ Borrar TODO el Historial", type="primary"):
+            col_del_all, _ = st.columns([1, 4])
+            if col_del_all.button("🗑️ Borrar TODO", type="primary"):
                 st.session_state.history_db = []
                 st.rerun()
-            
             st.divider()
-            
-            # LISTADO DE INFORMES (Inverso para ver el más nuevo arriba)
             items_to_delete = []
-            
             for item in reversed(st.session_state.history_db):
                 with st.container():
                     c_check, c_content = st.columns([0.5, 9])
-                    
-                    # Checkbox para seleccionar
-                    if c_check.checkbox("Select", key=f"chk_{item['id']}", label_visibility="collapsed"):
+                    if c_check.checkbox("Sel", key=f"chk_{item['id']}", label_visibility="collapsed"):
                         items_to_delete.append(item['id'])
-                    
-                    # Contenido Expander
                     with c_content.expander(f"📅 {item['date']} | {item['mode']} | {item['note']}"):
                         st.markdown(item['result'], unsafe_allow_html=True)
-            
-            # BOTÓN BORRAR SELECCIONADOS (Flotante o al final)
             if items_to_delete:
                 st.markdown("---")
                 if st.button(f"🗑️ Borrar {len(items_to_delete)} seleccionados"):
@@ -519,14 +484,15 @@ with col_center:
 
 # --- COLUMNA 3: ESTADÍSTICAS ---
 with col_right:
-    st.subheader("📈 Pronóstico")
-    if len(st.session_state.historial_evolucion) > 0:
-        df = pd.DataFrame(st.session_state.historial_evolucion)
-        st.line_chart(df.set_index("Fecha"))
-        pred = predecir_cierre()
-        st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
-    else:
-        st.caption("La gráfica aparecerá cuando haya historial.")
+    # Plegado por defecto
+    with st.expander("📈 Pronóstico (Ver Gráfica)", expanded=False):
+        if len(st.session_state.historial_evolucion) > 0:
+            df = pd.DataFrame(st.session_state.historial_evolucion)
+            st.line_chart(df.set_index("Fecha"))
+            pred = predecir_cierre()
+            st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
+        else:
+            st.caption("Sin datos suficientes.")
 
 st.divider()
 if st.button("🔒 Salir"):
