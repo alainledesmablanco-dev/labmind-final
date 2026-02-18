@@ -5,6 +5,7 @@ import pypdf
 import tempfile
 import time
 import os
+import io
 from fpdf import FPDF
 import datetime
 import re
@@ -15,49 +16,30 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 58.0 (Linear Layout)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 60.0 (Multi-Proto)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS (COMPACTO) ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    /* 1. MARGEN SUPERIOR MÍNIMO */
-    .block-container {
-        padding-top: 0.5rem !important;
-        padding-bottom: 2rem !important;
-    }
-    
-    /* 2. ESPACIO ENTRE WIDGETS = 0 */
-    div[data-testid="stVerticalBlock"] > div {
-        gap: 0rem !important; 
-        padding-bottom: 0px !important;
-    }
-    
-    /* 3. PEGAR SELECTORES */
-    div[data-testid="stSelectbox"] {
-        margin-bottom: -15px !important;
-    }
-    
-    /* ESTILOS GENERALES */
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
+    div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; padding-bottom: 0px !important; }
+    div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; margin-top: 10px; }
-    
-    /* CAJAS RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
-
-    /* BARRA TEJIDOS */
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .tissue-gran { background-color: #ef5350; height: 100%; }
     .tissue-slough { background-color: #fdd835; height: 100%; }
     .tissue-nec { background-color: #212121; height: 100%; }
-    
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
-    
+    .proto-success { background-color: #e8f5e9; color: #2e7d32; padding: 8px; border-radius: 5px; font-size: 0.85rem; border: 1px solid #c8e6c9; margin-bottom: 5px; }
     [data-testid='stFileUploaderDropzone'] { padding: 5px !important; min-height: 60px; }
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
+    .tight-space { margin-top: -15px !important; margin-bottom: -15px !important; padding: 0px !important; height: 1px !important; background-color: #e0e0e0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,7 +176,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 58.0")
+st.title("🩺 LabMind 60.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -205,7 +187,24 @@ with col_left:
     st.session_state.punto_cuerpo = seleccion_zona
     
     with st.expander("📚 Protocolo Unidad", expanded=False):
-        proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
+        # 1. BUSCAR PROTOCOLO FIJO MULTIFORMATO
+        fixed_proto_path = None
+        detected_name = ""
+        
+        # Orden de prioridad: PDF -> JPG -> PNG
+        if os.path.exists("protocolo.pdf"): fixed_proto_path = "protocolo.pdf"; detected_name = "PDF"
+        elif os.path.exists("protocolo.jpg"): fixed_proto_path = "protocolo.jpg"; detected_name = "JPG"
+        elif os.path.exists("protocolo.png"): fixed_proto_path = "protocolo.png"; detected_name = "PNG"
+        
+        using_fixed_proto = False
+        if fixed_proto_path:
+            st.markdown(f'<div class="proto-success">✅ <b>protocolo.{detected_name.lower()}</b> detectado</div>', unsafe_allow_html=True)
+            using_fixed_proto = True
+        else:
+            st.caption("Guarda 'protocolo.jpg' o '.pdf' en la carpeta.")
+
+        # 2. UPLOADER
+        proto_uploaded = st.file_uploader("Subir (Sobrescribe Fijo)", type=["pdf", "jpg", "png"], key="global_proto")
 
 # --- COLUMNA 2 ---
 with col_center:
@@ -287,18 +286,16 @@ with col_center:
 
         st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
-        # --- ORDEN VERTICAL MODIFICADO (AUDIO -> NOTAS -> ETIQUETA) ---
-        
-        # 1. AUDIO
-        audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        
-        # 2. NOTAS TEXTO
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
-        
-        # 3. ETIQUETA HISTORIAL
-        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
+        # --- AUDIO COMPACTO ---
+        c_audio, c_tag = st.columns([0.6, 0.4])
+        with c_audio:
+            audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
+        with c_tag:
+            st.write("") 
+            nota_historial = st.text_input("🏷️ Etiqueta:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
-        # BOTÓN ANALIZAR
+        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
+
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
@@ -308,11 +305,38 @@ with col_center:
                     genai.configure(api_key=st.session_state.api_key)
                     model = genai.GenerativeModel("models/gemini-3-flash-preview")
                     
-                    con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""
+                    con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""
 
-                    if proto_file: # Protocolo
-                        if "pdf" in proto_file.type: r=pypdf.PdfReader(proto_file); con.append(r.pages[0].extract_text()) # Simplificado
-                        else: con.append(Image.open(proto_file))
+                    # --- GESTION INTELIGENTE DEL PROTOCOLO (PDF / IMG) ---
+                    final_proto_obj = None
+                    is_local = False
+                    
+                    if proto_uploaded: # 1. Prioridad: Subido manual
+                        final_proto_obj = proto_uploaded
+                    elif using_fixed_proto and fixed_proto_path: # 2. Prioridad: Fijo
+                        final_proto_obj = fixed_proto_path
+                        is_local = True
+
+                    if final_proto_obj:
+                        # Si es local, lo abrimos. Si es subido, ya está abierto.
+                        # Determinamos si es PDF o Imagen por extensión o tipo
+                        is_pdf = False
+                        
+                        if is_local:
+                            if fixed_proto_path.endswith(".pdf"): is_pdf = True
+                            file_handle = open(fixed_proto_path, "rb")
+                        else:
+                            if "pdf" in final_proto_obj.type: is_pdf = True
+                            file_handle = final_proto_obj
+
+                        if is_pdf:
+                            r = pypdf.PdfReader(file_handle)
+                            txt_proto += "".join([p.extract_text() for p in r.pages])
+                        else:
+                            # Es imagen (JPG/PNG), la añadimos al contexto visual
+                            img_proto = Image.open(file_handle)
+                            con.append(img_proto)
+                            txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]" # Aviso al prompt
                     
                     # Procesar Archivos
                     for fs in [meds_files, labs_files, reports_files]:
@@ -346,7 +370,7 @@ with col_center:
 
                     prompt = f"""
                     Rol: APN. Modo: {modo}. Zona: {st.session_state.punto_cuerpo}. Notas: "{notas}"
-                    INPUTS: FARMACIA: {txt_meds}
+                    INPUTS: FARMACIA: {txt_meds} PROTOCOLO TEXTO: {txt_proto}
                     INSTRUCCIONES:
                     1. RESUMEN:
                     <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO:</b><br>[Texto]</div>
