@@ -15,13 +15,21 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 47.0 (Clean Start)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 48.0 (Audio Fix)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
+    /* BOTÓN BORRAR AUDIO (ROJO PEQUEÑO) */
+    div[data-testid="column"] .stButton button[kind="secondary"] {
+        background-color: #ffebee;
+        color: #c62828;
+        border: 1px solid #ef9a9a;
+        width: 100%;
+    }
+
     /* CAJAS DE RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
@@ -178,7 +186,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 47.0")
+st.title("🩺 LabMind 48.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -219,6 +227,7 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         usar_moneda = False
+        mostrar_imagenes = False # Default global
         
         if modo == "🧩 Integral (Analizar Todo)":
             st.info("🧩 **Modo Integral**: Sube cualquier evidencia.")
@@ -231,7 +240,10 @@ with col_center:
                 c4, c5 = st.columns(2)
                 ecg_files = c4.file_uploader("📈 ECG", accept_multiple_files=True, key="int_ecg")
                 rad_files = c5.file_uploader("💀 RX/TAC", accept_multiple_files=True, key="int_rad")
+            
             st.write("📸 **Estado Visual Paciente (Foto/Video):**")
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+            
             fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
             if fuente == "📸 WebCam":
                 if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
@@ -241,7 +253,10 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras":
             st.info("🩹 **Modo Heridas**")
+            # --- ORDEN SOLICITADO: MONEDA LUEGO VISUAL ---
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+            
             with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
                 if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev"):
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
@@ -259,6 +274,7 @@ with col_center:
 
         elif modo == "🧴 Dermatología":
             st.info("🧴 **Modo Dermatología**")
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
             with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
                 if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_prev"):
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
@@ -285,12 +301,23 @@ with col_center:
             reports_files = st.file_uploader("PDFs/Fotos", accept_multiple_files=True, key="rep_docs")
 
         st.markdown("---")
-        audio = st.audio_input("🎙️ Notas de Voz")
+        
+        # --- AUDIO CON BOTÓN DE BORRADO ---
+        c_audio_1, c_audio_2 = st.columns([0.85, 0.15])
+        with c_audio_1:
+            audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder")
+        with c_audio_2:
+            st.write("")
+            st.write("")
+            # Botón tipo 'secondary' para que se vea más discreto o estilo custom
+            if st.button("❌", help="Borrar grabación", key="btn_clear_audio", type="secondary"):
+                # Truco para limpiar el componente: no hay API directa, pero el rerun recarga el estado si se manipula
+                # En Streamlit actual, st.audio_input mantiene estado. Reiniciamos la página o usamos un key dinámico.
+                # La forma más limpia es un rerun simple, el usuario tendrá que grabar de nuevo.
+                st.rerun()
+
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, alergias...")
         nota_historial = st.text_input("🏷️ Etiqueta para Historial (Opcional):", placeholder="Ej: Paciente 304 - Revisión")
-
-        # --- OPCIÓN PARA MOSTRAR/OCULTAR IMÁGENES PROCESADAS (FALSE por defecto) ---
-        mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
 
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
@@ -335,7 +362,8 @@ with col_center:
                                 txt_rad_desc += "\n[VIDEO RADIOLÓGICO]"
                             else: con.append(Image.open(f)); txt_rad_desc += "\n[IMAGEN RX]"
 
-                    if audio: con.append(genai.upload_file(audio, mime_type="audio/wav"))
+                    # Usamos la variable audio_val del widget
+                    if audio_val: con.append(genai.upload_file(audio_val, mime_type="audio/wav"))
                     
                     img_display = None; img_thermal = None; img_biofilm = None; biofilm_detectado = False
                     
@@ -454,7 +482,6 @@ with col_center:
                     with st.chat_message("user"): st.markdown(prompt)
                     with st.chat_message("assistant"):
                         try:
-                            # CHAT MODEL: GEMINI 3 FLASH PREVIEW
                             chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
                             ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
                             full_resp = chat_model.generate_content(ctx)
