@@ -15,26 +15,30 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 54.0 (Native Audio)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 56.0 (Manual Data)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    /* 1. ELIMINAR MARGEN SUPERIOR */
-    .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
-    }
-    
-    /* ESTILO GENERAL BOTONES */
+    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
-    /* CAJAS DE RESUMEN */
+    /* BOTONES SECUNDARIOS (Borrar audio / Añadir dato) */
+    div[data-testid="column"] button[kind="secondary"] {
+        background-color: #ffebee !important; color: #c62828 !important; border: 1px solid #ef9a9a !important;
+        height: 44px !important; width: 100% !important; padding: 0px !important; margin-top: 0px !important; line-height: 1 !important;
+    }
+    
+    .manual-data-btn button {
+        background-color: #e8f5e9 !important; color: #2e7d32 !important; border: 1px solid #a5d6a7 !important;
+    }
+
+    /* CAJAS RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
 
-    /* BARRA DE TEJIDOS */
+    /* BARRA TEJIDOS */
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -44,7 +48,6 @@ st.markdown("""
     
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     
-    /* HISTORIAL */
     .history-card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
     
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
@@ -52,8 +55,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTOR DE ESTADO ---
+# --- GESTOR DE ESTADO & COOKIES ---
 cookie_manager = stx.CookieManager()
+time.sleep(0.1)
+
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
 if "api_key" not in st.session_state: st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state: st.session_state.resultado_analisis = None
@@ -66,7 +71,6 @@ if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 if "history_db" not in st.session_state: st.session_state.history_db = []
 
 # --- LOGIN ---
-time.sleep(0.1)
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
 if not st.session_state.autenticado:
     if cookie_api_key:
@@ -162,14 +166,35 @@ def anonymize_face(pil_image):
         return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), processed
     except: return pil_image, False
 
+# --- LOGICA PREDICCIÓN ACTUALIZADA (MÍNIMO 2 REGISTROS) ---
 def predecir_cierre():
     hist = st.session_state.historial_evolucion
-    if len(hist) < 3: return "Necesito +3 registros para predecir."
-    areas = [h['Area'] for h in hist]
-    reduccion = (areas[0] - areas[-1]) / len(hist)
-    if reduccion <= 0: return "⚠️ Estancamiento. No hay cierre previsto."
-    dias = areas[-1] / reduccion
-    return f"Cierre estimado en: **{int(dias)} días**."
+    # Ordenar por fecha para asegurar cronología
+    try:
+        hist_sorted = sorted(hist, key=lambda x: datetime.datetime.strptime(x['Fecha'], "%d/%m") if len(x['Fecha']) <= 5 else datetime.datetime.now())
+    except:
+        hist_sorted = hist # Fallback
+
+    if len(hist_sorted) < 2: return "Necesito al menos 2 registros (Actual + 1 Previo)."
+    
+    areas = [h['Area'] for h in hist_sorted]
+    
+    # Calcular velocidad de cierre entre el primero y el ultimo
+    reduccion_total = areas[0] - areas[-1]
+    
+    if reduccion_total <= 0: return "⚠️ Estancamiento o empeoramiento."
+    
+    # Días aproximados entre puntos (asumiendo 1 dia si no hay fecha real, o calculando)
+    # Simplificación: Usamos la pendiente media por registro
+    reduccion_promedio = reduccion_total / (len(areas) - 1)
+    
+    if reduccion_promedio <= 0: return "⚠️ Sin avance."
+    
+    dias_restantes = areas[-1] / reduccion_promedio
+    # Ajuste conservador
+    dias_estimados = int(dias_restantes * 1.5) 
+    
+    return f"Cierre estimado en: **{dias_estimados} - {dias_estimados+5} días** (si se mantiene ritmo)."
 
 def create_pdf(texto_analisis):
     class PDF(FPDF):
@@ -185,7 +210,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 54.0")
+st.title("🩺 LabMind 56.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -226,9 +251,13 @@ with col_center:
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
-        usar_moneda = False
-        mostrar_imagenes = False 
         
+        # COOKIES
+        cookie_moneda = cookie_manager.get("pref_moneda"); default_moneda = True if cookie_moneda == "True" else False
+        cookie_visual = cookie_manager.get("pref_visual"); default_visual = True if cookie_visual == "True" else False
+        cookie_fuente = cookie_manager.get("pref_fuente"); idx_fuente = 1 if cookie_fuente == "WebCam" else 0
+
+        # --- LÓGICA MODOS ---
         if modo == "🧩 Integral (Analizar Todo)":
             st.info("🧩 **Modo Integral**: Sube cualquier evidencia.")
             with st.expander("📂 Documentación Clínica (Desplegar)", expanded=False):
@@ -240,74 +269,96 @@ with col_center:
                 c4, c5 = st.columns(2)
                 ecg_files = c4.file_uploader("📈 ECG", accept_multiple_files=True, key="int_ecg")
                 rad_files = c5.file_uploader("💀 RX/TAC", accept_multiple_files=True, key="int_rad")
-            
             st.write("📸 **Estado Visual Paciente (Foto/Video):**")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
-            
-            fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
-            if fuente == "📸 WebCam":
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=default_visual, key="chk_visual_int")
+            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_fuente_int")
+            if fuente_label == "📸 WebCam":
                 if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
             else:
                 if fs := st.file_uploader("Subir Foto Paciente", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
-        elif modo == "🩹 Heridas / Úlceras":
-            st.info("🩹 **Modo Heridas**")
-            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+        elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
+            st.info(f"{'🩹' if 'Heridas' in modo else '🧴'} **Modo {modo}**")
+            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir", value=default_moneda, key="chk_moneda")
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=default_visual, key="chk_visual")
             
-            with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
-                if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev"):
+            if usar_moneda != default_moneda: cookie_manager.set("pref_moneda", str(usar_moneda), expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
+            if mostrar_imagenes != default_visual: cookie_manager.set("pref_visual", str(mostrar_imagenes), expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
+            
+            # --- SECCIÓN DE EVOLUCIÓN (AHORA CON CARGA MANUAL) ---
+            with st.expander("⏮️ Ver Evolución (Subir Foto / Añadir Dato)", expanded=False):
+                st.markdown("**Opción A: Subir Foto Previa (Visual)**")
+                prev = st.file_uploader("Foto Previa (Comparativa)", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev")
+                
+                st.markdown("---")
+                st.markdown("**Opción B: Añadir Dato Histórico (Para Gráfica)**")
+                st.caption("Si tienes datos de días anteriores en la historia clínica, añádelos aquí para activar la predicción.")
+                c_date, c_area, c_add = st.columns([0.4, 0.4, 0.2])
+                with c_date:
+                    date_manual = st.date_input("Fecha", value=datetime.date.today() - datetime.timedelta(days=7))
+                with c_area:
+                    area_manual = st.number_input("Área (cm²)", min_value=0.0, step=0.1)
+                with c_add:
+                    st.write("")
+                    st.write("")
+                    if st.button("➕ Añadir", key="btn_add_manual", type="secondary"):
+                        # Añadir al historial
+                        st.session_state.historial_evolucion.append({
+                            "Fecha": date_manual.strftime("%d/%m"),
+                            "Area": area_manual
+                        })
+                        st.toast("✅ Dato histórico añadido")
+
+                if prev:
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
+
             with st.expander("💊 Medicación / Analítica (Opcional)", expanded=False):
                 c1, c2 = st.columns(2)
                 meds_files = c1.file_uploader("Medicación", accept_multiple_files=True, key="w_meds")
                 labs_files = c2.file_uploader("Analítica", accept_multiple_files=True, key="w_labs")
-            st.write("📸 **Estado ACTUAL (Foto/Video):**")
-            fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
-            if fuente == "📸 WebCam":
-                if f := st.camera_input("Foto Herida"): archivos.append(("cam", f))
-            else:
-                if fs := st.file_uploader("Subir Foto/Video Actual", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
-                    for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
-
-        elif modo == "🧴 Dermatología":
-            st.info("🧴 **Modo Dermatología**")
-            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
             
-            with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
-                if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_prev"):
-                    for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
             st.write("📸 **Estado ACTUAL (Foto/Video):**")
-            if fs := st.file_uploader("Subir Foto/Video Actual", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_img"):
-                for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
+            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_fuente")
+            
+            actual_fuente_val = "WebCam" if "WebCam" in fuente_label else "Archivo"
+            if actual_fuente_val != cookie_fuente: cookie_manager.set("pref_fuente", actual_fuente_val, expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
+
+            if fuente_label == "📸 WebCam":
+                if f := st.camera_input("Foto"): archivos.append(("cam", f))
+            else:
+                if fs := st.file_uploader("Subir Foto Actual", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
+                    for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
         elif modo == "💊 Farmacia (Interacciones)":
             st.info("💊 **Modo Farmacia**")
             meds_files = st.file_uploader("Receta/Caja", accept_multiple_files=True, key="p_docs")
-
         elif modo == "📈 ECG (Cardiología)":
             st.info("📈 **Modo Cardiología**")
             if fs := st.file_uploader("Imagen ECG", type=['jpg','png','pdf'], accept_multiple_files=True, key="ecg_docs"):
                 for f in fs: archivos.append(("img", f))
-
         elif modo == "💀 RX / TAC / RMN (Imagen)":
             st.info("💀 **Modo Radiología**")
             if fs := st.file_uploader("Video/Imagen RX", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="rx_docs"):
                 for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
-
         elif modo == "📂 Analizar Informes":
             st.info("📂 **Modo Informes**")
             reports_files = st.file_uploader("PDFs/Fotos", accept_multiple_files=True, key="rep_docs")
 
         st.markdown("---")
         
-        # --- AUDIO NATIVO Y LIMPIO ---
-        audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)")
-        
-        # Etiqueta Historial
-        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304")
+        # --- AUDIO COMPACTO ---
+        c_audio, c_del, c_tag = st.columns([0.5, 0.1, 0.4])
+        with c_audio:
+            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
+        with c_del:
+            st.write("") 
+            if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
+                st.rerun()
+        with c_tag:
+            st.write("") 
+            st.write("") 
+            nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
 
@@ -342,7 +393,6 @@ with col_center:
                         for f in ecg_files:
                             if "pdf" in f.type: r = pypdf.PdfReader(f); txt_reports += "\n[ECG PDF]: " + "".join([p.extract_text() for p in r.pages])
                             else: con.append(Image.open(f)); txt_reports += "\n[IMAGEN ECG ADJUNTA]"
-
                     if rad_files:
                         for f in rad_files:
                             if "pdf" in f.type: r = pypdf.PdfReader(f); txt_reports += "\n[INFORME RX]: " + "".join([p.extract_text() for p in r.pages])
@@ -356,7 +406,7 @@ with col_center:
 
                     if audio_val: con.append(genai.upload_file(audio_val, mime_type="audio/wav"))
                     
-                    img_display = None; img_thermal = None; img_biofilm = None; biofilm_detectado = False
+                    img_display = None; img_thermal = None; img_prev_display = None
                     
                     for label, a in archivos:
                         is_video = "video" in label
@@ -367,18 +417,20 @@ with col_center:
                             con.append(vf); os.remove(tp)
                         else: 
                             img_pil = Image.open(a)
-                            if ("Heridas" in modo or "Dermatología" in modo) and "prev" not in label: 
-                                area, img_medida, coin = medir_herida_con_referencia(img_pil, usar_moneda)
-                                if area > 0: st.session_state.area_herida = area
-                                img_thermal = procesar_termografia(img_pil)
-                                img_biofilm, biofilm_detectado = detectar_biofilm(img_pil)
-                                img_display = img_medida
-                                con.append(img_pil); con.append(img_thermal)
+                            if ("Heridas" in modo or "Dermatología" in modo):
+                                if "prev" in label:
+                                    img_prev_display = img_pil 
+                                    con.append(img_pil)
+                                else:
+                                    area, img_medida, coin = medir_herida_con_referencia(img_pil, usar_moneda)
+                                    if area > 0: st.session_state.area_herida = area
+                                    img_thermal = procesar_termografia(img_pil)
+                                    detectar_biofilm(img_pil)
+                                    img_display = img_medida
+                                    con.append(img_pil); con.append(img_thermal)
                             elif modo == "🧩 Integral (Analizar Todo)":
                                 img_final, proc = anonymize_face(img_pil)
                                 img_display = img_final; con.append(img_final)
-                            elif "RX" in modo or "ECG" in modo or "Farmacia" in modo:
-                                img_display = img_pil; con.append(img_pil)
                             else: 
                                 img_final, proc = anonymize_face(img_pil)
                                 if "prev" not in label: img_display = img_final
@@ -391,7 +443,7 @@ with col_center:
                     Notas: "{notas}"
                     
                     INPUTS:
-                    - PROTOCOLO UNIDAD: {txt_proto}
+                    - PROTOCOLO: {txt_proto}
                     - FARMACIA: {txt_meds}
                     - ANALÍTICAS: {txt_labs}
                     - INFORMES: {txt_reports}
@@ -448,8 +500,15 @@ with col_center:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
                     if mostrar_imagenes:
-                        if img_display: st.image(img_display, caption="Evidencia", width=300)
-                        if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
+                        if img_prev_display and img_display:
+                            st.markdown("##### 🔄 Evolución: Antes vs Ahora")
+                            c_prev, c_curr = st.columns(2)
+                            with c_prev: st.image(img_prev_display, caption="🗓️ ESTADO PREVIO", width=300)
+                            with c_curr: st.image(img_display, caption="📸 ESTADO ACTUAL", width=300)
+                            if img_thermal: st.image(img_thermal, caption="🌡️ Mapa Térmico", width=300)
+                        elif img_display:
+                            st.image(img_display, caption="Evidencia", width=300)
+                            if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
 
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -466,14 +525,34 @@ with col_center:
                 for message in st.session_state.chat_messages:
                     with st.chat_message(message["role"]): st.markdown(message["content"])
 
+                # CHIPS
+                st.caption("Sugerencias rápidas:")
+                col_chip1, col_chip2, col_chip3 = st.columns(3)
+                chip_prompt = None
+                if col_chip1.button("📝 Generar Informe Alta", key="chip_alta", type="secondary"): chip_prompt = "Redacta informe de alta."
+                if col_chip2.button("🩹 Plan de Cuidados", key="chip_plan", type="secondary"): chip_prompt = "Plan de cuidados NANDA/NOC/NIC."
+                if col_chip3.button("⚠️ Signos Alarma", key="chip_alarma", type="secondary"): chip_prompt = "¿Signos de alarma a vigilar?"
+
                 if prompt := st.chat_input("Pregunta sobre el caso..."):
                     st.session_state.chat_messages.append({"role": "user", "content": prompt})
                     with st.chat_message("user"): st.markdown(prompt)
                     with st.chat_message("assistant"):
                         try:
-                            # CHAT MODEL: GEMINI 3 FLASH PREVIEW
                             chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
                             ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
+                            full_resp = chat_model.generate_content(ctx)
+                            st.markdown(full_resp.text)
+                            st.session_state.chat_messages.append({"role": "assistant", "content": full_resp.text})
+                        except Exception as e: st.error(f"Error chat: {e}")
+                
+                # Respuesta Chip
+                if chip_prompt:
+                    st.session_state.chat_messages.append({"role": "user", "content": chip_prompt})
+                    with st.chat_message("user"): st.markdown(chip_prompt)
+                    with st.chat_message("assistant"):
+                        try:
+                            chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
+                            ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {chip_prompt}"
                             full_resp = chat_model.generate_content(ctx)
                             st.markdown(full_resp.text)
                             st.session_state.chat_messages.append({"role": "assistant", "content": full_resp.text})
@@ -515,7 +594,7 @@ with col_right:
             pred = predecir_cierre()
             st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
         else:
-            st.caption("Sin datos suficientes.")
+            st.caption("Añade datos en 'Ver Evolución' o analiza una herida.")
 
 st.divider()
 if st.button("🔒 Salir"):
