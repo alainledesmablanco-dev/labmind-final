@@ -15,28 +15,30 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 56.0 (Zero Gap)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 56.1 (Ultra Tight)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS AGRESIVOS (ZERO GAP) ---
+# --- ESTILOS CSS AGRESIVOS (ZERO GAP + NEGATIVE MARGIN) ---
 st.markdown("""
 <style>
-    /* 1. MARGEN SUPERIOR MÍNIMO */
+    /* 1. MARGEN SUPERIOR GLOBAL MÍNIMO */
     .block-container {
         padding-top: 0.5rem !important;
         padding-bottom: 2rem !important;
     }
     
-    /* 2. COMPRESIÓN VERTICAL ENTRE ELEMENTOS */
-    div[data-testid="column"] {
-        gap: 0.2rem !important; /* Espacio mínimo entre widgets */
+    /* 2. COMPRESIÓN ENTRE WIDGETS */
+    div[data-testid="stVerticalBlock"] > div {
+        gap: 0.1rem !important; /* Reduce espacio entre elementos verticales */
+        padding-bottom: 0px !important;
     }
     
-    /* 3. LÍNEA DIVISORIA PERSONALIZADA (Reemplaza a ---) */
-    .fine-line {
-        border-top: 1px solid #e0e0e0;
-        margin-top: 5px !important;
-        margin-bottom: 5px !important;
+    /* 3. CLASE ESPECIAL PARA PEGAR ELEMENTOS */
+    .tight-space {
+        margin-top: -15px !important;
+        margin-bottom: -15px !important;
         padding: 0px !important;
+        height: 1px !important; 
+        background-color: #e0e0e0; /* Línea sutilísima */
     }
     
     /* ESTILOS GENERALES */
@@ -57,8 +59,6 @@ st.markdown("""
     
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     
-    /* UPLOADER COMPACTO */
-    [data-testid='stFileUploaderDropzone'] { padding: 10px !important; min-height: 80px; }
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
 </style>
@@ -197,7 +197,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 56.0")
+st.title("🩺 LabMind 56.1")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -207,7 +207,7 @@ with col_left:
     seleccion_zona = st.selectbox("Zona anatómica:", zonas_cuerpo)
     st.session_state.punto_cuerpo = seleccion_zona
     
-    st.markdown('<div class="fine-line"></div>', unsafe_allow_html=True) # Línea Fina
+    st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True) 
     
     with st.expander("📚 Protocolo Unidad", expanded=False):
         proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
@@ -223,8 +223,8 @@ with col_center:
                      ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
-        # --- AQUÍ ESTÁ EL CAMBIO: LÍNEA FINA EN LUGAR DE ---
-        st.markdown('<div class="fine-line"></div>', unsafe_allow_html=True)
+        # --- AQUÍ: LÍNEA "INVISIBLE" COMPACTA ---
+        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
@@ -234,7 +234,7 @@ with col_center:
         cookie_visual = cookie_manager.get("pref_visual"); default_visual = True if cookie_visual == "True" else False
         cookie_fuente = cookie_manager.get("pref_fuente"); idx_fuente = 1 if cookie_fuente == "WebCam" else 0
 
-        # LÓGICA MODOS (Resumida para espacio)
+        # LÓGICA MODOS
         if modo == "🧩 Integral (Analizar Todo)":
             with st.expander("📂 Documentación", expanded=False):
                 c1, c2 = st.columns(2)
@@ -281,7 +281,7 @@ with col_center:
                 if fs := st.file_uploader("Subir", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
-        # OTROS MODOS SIMPLIFICADOS
+        # OTROS MODOS
         elif modo == "💊 Farmacia": meds_files = st.file_uploader("Receta", accept_multiple_files=True, key="p_docs")
         elif modo == "📈 ECG": 
             if fs:=st.file_uploader("ECG", type=['jpg','pdf'], accept_multiple_files=True): 
@@ -291,7 +291,7 @@ with col_center:
                 for f in fs: archivos.append(("img",f))
         elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
 
-        st.markdown('<div class="fine-line"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
         # --- AUDIO COMPACTO ---
         c_audio, c_tag = st.columns([0.6, 0.4])
