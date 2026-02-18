@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 45.0 (Smart Chat)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 47.0 (Clean Start)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -178,7 +178,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 45.0")
+st.title("🩺 LabMind 47.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -288,6 +288,9 @@ with col_center:
         audio = st.audio_input("🎙️ Notas de Voz")
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, alergias...")
         nota_historial = st.text_input("🏷️ Etiqueta para Historial (Opcional):", placeholder="Ej: Paciente 304 - Revisión")
+
+        # --- OPCIÓN PARA MOSTRAR/OCULTAR IMÁGENES PROCESADAS (FALSE por defecto) ---
+        mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
 
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
@@ -425,8 +428,10 @@ with col_center:
                     if st.session_state.resultado_analisis:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
-                    if img_display: st.image(img_display, caption="Evidencia", width=300)
-                    if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
+                    # --- VISUALIZACIÓN CONDICIONAL ---
+                    if mostrar_imagenes:
+                        if img_display: st.image(img_display, caption="Evidencia", width=300)
+                        if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
 
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -438,22 +443,24 @@ with col_center:
             st.markdown(txt, unsafe_allow_html=True)
             
             st.markdown("---")
-            st.subheader("💬 Asistente Clínico (Chat)")
-            for message in st.session_state.chat_messages:
-                with st.chat_message(message["role"]): st.markdown(message["content"])
+            
+            # --- CHAT PLEGADO POR DEFECTO ---
+            with st.expander("💬 Abrir Asistente Clínico (Chat)", expanded=False):
+                for message in st.session_state.chat_messages:
+                    with st.chat_message(message["role"]): st.markdown(message["content"])
 
-            if prompt := st.chat_input("Pregunta sobre el caso..."):
-                st.session_state.chat_messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"): st.markdown(prompt)
-                with st.chat_message("assistant"):
-                    try:
-                        # CHAT MODEL UPDATED TO 3 FLASH
-                        chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
-                        ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
-                        full_resp = chat_model.generate_content(ctx)
-                        st.markdown(full_resp.text)
-                        st.session_state.chat_messages.append({"role": "assistant", "content": full_resp.text})
-                    except Exception as e: st.error(f"Error chat: {e}")
+                if prompt := st.chat_input("Pregunta sobre el caso..."):
+                    st.session_state.chat_messages.append({"role": "user", "content": prompt})
+                    with st.chat_message("user"): st.markdown(prompt)
+                    with st.chat_message("assistant"):
+                        try:
+                            # CHAT MODEL: GEMINI 3 FLASH PREVIEW
+                            chat_model = genai.GenerativeModel("models/gemini-3-flash-preview")
+                            ctx = f"CONTEXTO: {st.session_state.resultado_analisis}\nPREGUNTA: {prompt}"
+                            full_resp = chat_model.generate_content(ctx)
+                            st.markdown(full_resp.text)
+                            st.session_state.chat_messages.append({"role": "assistant", "content": full_resp.text})
+                        except Exception as e: st.error(f"Error chat: {e}")
 
         if st.session_state.pdf_bytes:
             st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
@@ -484,7 +491,7 @@ with col_center:
 
 # --- COLUMNA 3: ESTADÍSTICAS ---
 with col_right:
-    # Plegado por defecto
+    # PLEGADO POR DEFECTO
     with st.expander("📈 Pronóstico (Ver Gráfica)", expanded=False):
         if len(st.session_state.historial_evolucion) > 0:
             df = pd.DataFrame(st.session_state.historial_evolucion)
