@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image
+from PIL import Image, ImageDraw
 import pypdf
 import tempfile
 import time
@@ -14,7 +14,7 @@ import extra_streamlit_components as stx
 import pandas as pd
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 34.1 (Protocol Added)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 37.0 (Coin Measure)", page_icon="🪙", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -61,7 +61,7 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      FUNCIONES AUXILIARES
+#      FUNCIONES DE MEDICIÓN Y VISIÓN
 # ==========================================
 
 def procesar_termografia(pil_image):
@@ -90,20 +90,86 @@ def detectar_biofilm(pil_image):
         return Image.fromarray(img_res), len(contours) > 0
     except: return pil_image, False
 
-def medir_herida(pil_image):
+# --- FUNCIÓN DE MEDICIÓN MEJORADA (MONEDA 1 EURO) ---
+def medir_herida_con_referencia(pil_image, usar_moneda=False):
+    """
+    Intenta detectar una moneda de 1 Euro (2.325 cm) para calibrar la escala.
+    Si no, usa una escala aproximada por defecto.
+    """
+    area_final = 0.0
+    img_annotated = pil_image.copy()
+    
     try:
-        img = np.array(pil_image.convert('RGB'))
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        img_np = np.array(pil_image.convert('RGB'))
+        img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        circles = cv2.HoughCircles(cv2.GaussianBlur(gray, (9,9), 2), cv2.HOUGH_GRADIENT, 1.2, 50, param1=100, param2=30, minRadius=20, maxRadius=200)
-        area = 0.0
-        if circles is not None:
-            r_c = circles[0][0][2]
-            pixels_per_cm = (r_c * 2) / 2.325
-            area_px = np.pi * (r_c**2) 
-            area = area_px * ((1 / pixels_per_cm) ** 2)
-        return area
-    except: return 0.0
+        
+        # 1. Detectar Moneda (Círculos)
+        pixels_per_cm = 0
+        circles = cv2.HoughCircles(
+            cv2.GaussianBlur(gray, (9, 9), 2), 
+            cv2.HOUGH_GRADIENT, 1.2, 50, param1=100, param2=30, minRadius=20, maxRadius=300
+        )
+        
+        moneda_detectada = False
+        
+        if circles is not None and usar_moneda:
+            circles = np.round(circles[0, :]).astype("int")
+            # Asumimos que el círculo más claro/definido es la moneda
+            for (x, y, r) in circles:
+                # Dibujar la moneda detectada en verde
+                cv2.circle(img_bgr, (x, y), r, (0, 255, 0), 4)
+                cv2.putText(img_bgr, "1 EUR (Ref)", (x - 20, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                
+                # DIÁMETRO 1 EURO = 2.325 cm
+                diameter_pixels = r * 2
+                pixels_per_cm = diameter_pixels / 2.325
+                moneda_detectada = True
+                break # Usamos el primer círculo válido
+        
+        # Fallback si no hay moneda o no se pide
+        if pixels_per_cm == 0:
+            # Aproximación genérica (suponiendo foto a 15-20cm)
+            pixels_per_cm = 100.0 
+
+        # 2. Detectar Herida (Segmentación básica por color rojizo/oscuro)
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        
+        # Rango de rojos/rosas para herida
+        lower_red1 = np.array([0, 50, 50])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([170, 50, 50])
+        upper_red2 = np.array([180, 255, 255])
+        
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask = mask1 + mask2
+        
+        # Limpiar ruido
+        kernel = np.ones((5,5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        area_pixels_total = 0
+        for c in contours:
+            if cv2.contourArea(c) > 500: # Filtrar ruido pequeño
+                # Evitar contar la moneda como herida (si coincidiera en color, raro en 1 euro que es dorada/plateada)
+                area_pixels_total += cv2.contourArea(c)
+                cv2.drawContours(img_bgr, [c], -1, (0, 0, 255), 2)
+
+        # 3. Calcular Área Real
+        if pixels_per_cm > 0:
+            pixel_area_sq_cm = (1 / pixels_per_cm) ** 2
+            area_final = area_pixels_total * pixel_area_sq_cm
+            
+        img_annotated = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+        
+        return area_final, img_annotated, moneda_detectada
+
+    except Exception as e:
+        print(f"Error medición: {e}")
+        return 0.0, pil_image, False
 
 def anonymize_face(pil_image):
     try:
@@ -145,7 +211,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 34.1 (Con Protocolo)")
+st.title("🩺 LabMind 37.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -161,10 +227,10 @@ with col_left:
     
     st.divider()
     
-    # --- AQUÍ ESTÁ LA FUNCIÓN RESTAURADA ---
-    st.markdown("### 📚 Protocolo de Unidad")
-    st.caption("Sube el PDF/Foto de tu guía para que la IA la respete.")
-    proto_file = st.file_uploader("Subir Protocolo", type=["pdf", "jpg", "png"], key="global_proto")
+    # --- PROTOCOLO PLEGADO ---
+    with st.expander("📚 Protocolo de Unidad (Opcional)", expanded=False):
+        st.caption("Sube el PDF/Foto de tu guía para que la IA la respete.")
+        proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
 
 # --- COLUMNA 2: NÚCLEO CENTRAL ---
 with col_center:
@@ -187,8 +253,9 @@ with col_center:
     archivos = []
     meds_files = None
     tests_files = None
+    usar_moneda = False # Por defecto
     
-    # MODO INTEGRAL
+    # === MODO INTEGRAL ===
     if modo == "🧩 Integral (Analizar Todo)":
         st.info("🧩 **Modo Integral**: Sube cualquier evidencia.")
         with st.expander("📂 Documentación (Fármacos, Informes)", expanded=True):
@@ -198,29 +265,54 @@ with col_center:
 
         st.write("📸 **Evidencia Visual (Foto/Video):**")
         fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
-        
         if fuente == "📸 WebCam":
             if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
         else:
-            if fs := st.file_uploader("Subir Foto/Video/RX", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
+            if fs := st.file_uploader("Subir Archivos", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
                 for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
-    # MODOS ESPECÍFICOS
+    # === MODO HERIDAS (ACTUAL + PREVIO + MONEDA) ===
     elif modo == "🩹 Heridas / Úlceras":
         st.info("🩹 **Modo Heridas**")
-        with st.expander("Opcional: Medicación/Analítica"):
+        
+        # 1. Checkbox Moneda
+        usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
+        if usar_moneda:
+            st.caption("ℹ️ Coloca una moneda de 1 Euro cerca de la herida para tener una referencia de tamaño exacta.")
+
+        # 2. Plegado: Evolución Previa
+        with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
+            st.caption("Adjunta imagen antigua para comparar:")
+            if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev"):
+                for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
+
+        # 3. Plegado: Contexto
+        with st.expander("💊 Medicación / Analítica (Opcional)", expanded=False):
             c1, c2 = st.columns(2)
             meds_files = c1.file_uploader("Medicación", accept_multiple_files=True, key="w_meds")
             tests_files = c2.file_uploader("Analítica", accept_multiple_files=True, key="w_labs")
         
-        if fs := st.file_uploader("Foto/Video Herida", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
-            for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
+        # 4. Principal: Estado Actual
+        st.write("📸 **Estado ACTUAL (Foto/Video):**")
+        fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
+        if fuente == "📸 WebCam":
+            if f := st.camera_input("Foto Herida"): archivos.append(("cam", f))
+        else:
+            if fs := st.file_uploader("Subir Foto/Video Actual", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
+                for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
+    # === MODO DERMATOLOGÍA ===
     elif modo == "🧴 Dermatología":
         st.info("🧴 **Modo Dermatología**")
-        if fs := st.file_uploader("Foto/Video Piel", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_img"):
+        with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
+            if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_prev"):
+                for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
+
+        st.write("📸 **Estado ACTUAL (Foto/Video):**")
+        if fs := st.file_uploader("Subir Foto/Video Actual", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_img"):
             for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
+    # === OTROS MODOS ===
     elif modo == "💊 Farmacia (Interacciones)":
         st.info("💊 **Modo Farmacia**")
         meds_files = st.file_uploader("Receta/Caja", accept_multiple_files=True, key="p_docs")
@@ -241,7 +333,7 @@ with col_center:
 
     st.markdown("---")
     audio = st.audio_input("🎙️ Notas de Voz")
-    notas = st.text_area("Notas Clínicas:", height=60)
+    notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, alergias...")
 
     # --- BOTÓN DE ANÁLISIS ---
     if st.button("🚀 ANALIZAR", type="primary"):
@@ -250,33 +342,30 @@ with col_center:
         with st.spinner(f"🧠 Analizando {modo}..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
-                model = genai.GenerativeModel("models/gemini-3-flash-preview")
+                model = genai.GenerativeModel("models/gemini-1.5-flash") # Modelo Estable
                 
                 con = []; txt_meds = ""; txt_tests = ""; txt_proto = ""
 
-                # Procesamiento Protocolo (Global)
-                if proto_file:
-                    if "pdf" in proto_file.type:
-                         r = pypdf.PdfReader(proto_file); txt_proto += "".join([p.extract_text() for p in r.pages])
-                    else: con.append(Image.open(proto_file))
-
                 # Procesamiento Docs
+                if proto_file:
+                    if "pdf" in proto_file.type: r = pypdf.PdfReader(proto_file); txt_proto += "".join([p.extract_text() for p in r.pages])
+                    else: con.append(Image.open(proto_file))
                 if meds_files:
                     for f in meds_files:
                         if "pdf" in f.type: r = pypdf.PdfReader(f); txt_meds += "".join([p.extract_text() for p in r.pages])
                         else: con.append(Image.open(f))
-                
                 if tests_files:
                     for f in tests_files:
                         if "pdf" in f.type: r = pypdf.PdfReader(f); txt_tests += "".join([p.extract_text() for p in r.pages])
                         else: con.append(Image.open(f))
-                
                 if audio: con.append(genai.upload_file(audio, mime_type="audio/wav"))
                 
                 img_display = None; img_thermal = None; img_biofilm = None; biofilm_detectado = False
                 
-                for t, a in archivos:
-                    if t == "video":
+                for label, a in archivos:
+                    is_video = "video" in label
+                    
+                    if is_video:
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf: tf.write(a.read()); tp = tf.name
                         vf = genai.upload_file(path=tp)
                         while vf.state.name == "PROCESSING": time.sleep(1); vf = genai.get_file(vf.name)
@@ -284,23 +373,31 @@ with col_center:
                     else: 
                         img_pil = Image.open(a)
                         # Lógica Visual
-                        if "Heridas" in modo:
-                            area = medir_herida(img_pil)
+                        if "Heridas" in modo and "prev" not in label: 
+                            # MEDICIÓN CON MONEDA
+                            area, img_medida, coin_found = medir_herida_con_referencia(img_pil, usar_moneda)
+                            
                             if area > 0: st.session_state.area_herida = area
+                            if coin_found: st.toast("🪙 Moneda detectada: Calibración exacta activa.")
+                            
                             img_thermal = procesar_termografia(img_pil)
                             img_biofilm, biofilm_detectado = detectar_biofilm(img_pil)
-                            img_display = img_pil
-                            con.append(img_pil); con.append(img_thermal)
+                            img_display = img_medida # Mostramos la imagen con la medición pintada
+                            
+                            # Enviamos la original a la IA para análisis clínico, mostramos la pintada al usuario
+                            con.append(img_pil) 
+                            con.append(img_thermal)
                         elif modo == "🧩 Integral (Analizar Todo)":
                             img_final, proc = anonymize_face(img_pil)
                             img_display = img_final; con.append(img_final)
-                        elif "RX" in modo or "ECG" in modo or "Farmacia" in modo or "Derma" in modo:
+                        elif "RX" in modo or "ECG" in modo or "Farmacia" in modo:
                             img_display = img_pil; con.append(img_pil)
-                        else:
+                        else: 
                             img_final, proc = anonymize_face(img_pil)
-                            img_display = img_final; con.append(img_final)
+                            if "prev" not in label: img_display = img_final
+                            con.append(img_final)
 
-                # Prompt Actualizado con Protocolo
+                # Prompt
                 prompt = f"""
                 Rol: APN / Especialista. Contexto: {contexto}. Modo: {modo}.
                 Zona Anatómica: {st.session_state.punto_cuerpo}.
@@ -311,10 +408,12 @@ with col_center:
                 - FARMACIA: {txt_meds}
                 - DOCUMENTOS: {txt_tests}
                 - VISUAL: {len(archivos)} archivos.
+                {f"- ÁREA MEDIDA (APROX/CALIBRADA): {st.session_state.area_herida:.2f} cm2" if st.session_state.area_herida > 0 else ""}
                 
                 INSTRUCCIONES CLAVE:
                 1. BASA TU DECISIÓN EN EL PROTOCOLO SUBIDO (Si existe).
                 2. Si es Integral: Cruza todos los datos.
+                3. Si hay imágenes PREVIAS y ACTUALES: Haz un análisis comparativo de la evolución.
                 """
                 
                 if "Farmacia" in modo: prompt += " CHECK DOSIS/ALERGIAS."
@@ -328,22 +427,31 @@ with col_center:
                 SYNC_ALERT: [ALERTA SI HAY CONFLICTO]
                 * **🚨 DIAGNÓSTICO:**
                 ...
-                ### 📊 Análisis Detallado
+                ### 📊 Análisis Detallado / Evolución
                 [Si es herida, HTML puro de barra tejidos]
                 ...
                 """
                 
-                resp = model.generate_content([prompt, *con] if con else prompt)
-                st.session_state.resultado_analisis = resp.text
+                # Retry Logic
+                for attempt in range(3):
+                    try:
+                        resp = model.generate_content([prompt, *con] if con else prompt)
+                        st.session_state.resultado_analisis = resp.text
+                        break 
+                    except Exception as e:
+                        if "429" in str(e) and attempt < 2: time.sleep(5); continue
+                        elif attempt == 2: st.error("⚠️ Servidor saturado.")
+                        else: raise e
                 
                 if "Heridas" in modo and st.session_state.area_herida > 0:
                     st.session_state.historial_evolucion.append({
                         "Fecha": datetime.datetime.now().strftime("%d/%m %H:%M"), "Area": st.session_state.area_herida
                     })
                 
-                st.session_state.pdf_bytes = create_pdf(resp.text.replace("*","").replace("#",""))
+                if st.session_state.resultado_analisis:
+                    st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis.replace("*","").replace("#",""))
 
-                if img_display: st.image(img_display, caption="Evidencia", width=300)
+                if img_display: st.image(img_display, caption="Evidencia Procesada", width=300)
                 if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
 
             except Exception as e: st.error(f"Error: {e}")
