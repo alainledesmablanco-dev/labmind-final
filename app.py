@@ -13,41 +13,23 @@ import cv2
 import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 27.4 (Total Sync)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 28.2 (RX Video)", page_icon="💀", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
-    
-    /* ALERTAS DE SEGURIDAD */
-    .sync-alert { 
-        border: 2px solid #d32f2f; 
-        padding: 15px; 
-        border-radius: 10px; 
-        background-color: #ffebee; 
-        color: #b71c1c; 
-        font-weight: bold; 
-        margin-bottom: 10px; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        animation: pulse 2s infinite;
-    }
-    
+    .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #ffebee; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     .biofilm-alert { border: 2px solid #ffd600; padding: 10px; border-radius: 10px; background-color: #fff9c4; color: #827717; font-weight: bold; }
     .prediction-box { background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-top: 10px; }
-    .ar-guide { border: 2px dashed #2ecc71; padding: 10px; text-align: center; color: #27ae60; font-weight: bold; margin-bottom: 10px; border-radius: 8px; background-color: #e8f8f5; }
-
-    /* BARRA DE TEJIDOS */
     .tissue-bar-container { display: flex; width: 100%; height: 25px; border-radius: 12px; overflow: hidden; margin: 10px 0; }
     .tissue-gran { background-color: #ef5350; color: white; display: flex; align-items: center; justify-content: center; font-size: 0.7em; font-weight: bold; }
     .tissue-slough { background-color: #fdd835; color: #333; display: flex; align-items: center; justify-content: center; font-size: 0.7em; font-weight: bold; }
     .tissue-nec { background-color: #212121; color: white; display: flex; align-items: center; justify-content: center; font-size: 0.7em; font-weight: bold; }
-
     @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(198, 40, 40, 0); } 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); } }
-    
-    /* UPLOADER */
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "Arrastra Archivos"; font-size: 1rem; font-weight: bold; color: #444; display: block; }
 </style>
@@ -62,6 +44,7 @@ if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
 if "historial_evolucion" not in st.session_state: st.session_state.historial_evolucion = []
 if "area_herida" not in st.session_state: st.session_state.area_herida = 0.0
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
+if "punto_cuerpo" not in st.session_state: st.session_state.punto_cuerpo = None
 
 # --- LOGIN ---
 time.sleep(0.1)
@@ -158,6 +141,7 @@ def create_pdf(texto_analisis):
     pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
     pdf.cell(0,10,f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",0,1); pdf.ln(5)
     clean = texto_analisis.replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
+    clean = re.sub(r'<[^>]+>', '', clean) 
     pdf.multi_cell(0,5, clean.encode('latin-1','replace').decode('latin-1'))
     return pdf.output(dest='S').encode('latin-1')
 
@@ -165,18 +149,21 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 27.4 (Total Sync)")
+st.title("🩺 LabMind 28.2 (RX Video Support)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
-# --- COLUMNA 1: CONTEXTO ---
+# --- COLUMNA 1: MAPA CORPORAL ---
 with col_left:
-    st.subheader("📍 Datos Paciente")
-    st.session_state.punto_mapa = st.selectbox("Zona Cuerpo:", ["Talón", "Sacro", "Pie Diabético", "Tibia", "Brazo", "Tórax", "N/A"])
-    st.image("https://cdn-icons-png.flaticon.com/512/3133/3133694.png", width=150)
-    
+    st.subheader("📍 Localización")
+    body_url = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ad/Human_body_features.svg/267px-Human_body_features.svg.png"
+    value = streamlit_image_coordinates(body_url, key="body_click")
+    if value:
+        st.session_state.punto_cuerpo = value
+        st.success(f"📌 Punto: X={value['x']}, Y={value['y']}")
+    else: st.info("👆 Toca la zona en la imagen")
+
     st.divider()
-    st.markdown("### 💊 Tratamiento")
-    with st.expander("Subir Fármacos", expanded=True):
+    with st.expander("💊 Subir Fármacos", expanded=True):
         meds_files = st.file_uploader("Fotos Caja/Receta", accept_multiple_files=True, key="meds")
 
 # --- COLUMNA 2: NÚCLEO ---
@@ -184,22 +171,23 @@ with col_center:
     st.subheader("1. Evidencia Clínica")
     c_ctx, c_mod = st.columns(2)
     contexto = c_ctx.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
-    modo = c_mod.radio("Modo:", ["🧩 Integral", "🩹 Heridas", "🧴 Dermatología", "📊 Analíticas", "📈 ECG", "💊 Farmacia"])
+    modo = c_mod.radio("Modo:", ["🧩 Integral", "🩹 Heridas", "🧴 Dermatología", "📊 Analíticas", "📈 ECG", "💊 Farmacia", "💀 RX / TAC / RMN"])
     
-    # --- BLOQUE DE ANALÍTICAS/PRUEBAS ---
-    st.markdown("### 📊 Analíticas y Pruebas (ECG/RX)")
-    with st.expander("Subir Analíticas / ECG / Pruebas", expanded=True):
-        tests_files = st.file_uploader("Sube PDF o Fotos de los resultados", accept_multiple_files=True, key="tests")
+    with st.expander("📊 Analíticas / ECG / RX", expanded=True):
+        tests_files = st.file_uploader("PDF/Fotos", accept_multiple_files=True, key="tests")
 
     st.markdown("---")
-    st.write("📸 **Estado Actual del Paciente (Foto/Video):**")
+    st.write("📸 **Evidencia Visual (Foto/Video):**")
+    st.caption("Acepta: JPG, PNG, MP4, MOV (Ideal para scroll de TAC/RMN)")
+    
     fuente = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed")
     archivos = []
     
     if fuente == "📸 WebCam":
         if f := st.camera_input("Foto"): archivos.append(("cam", f))
     else:
-        if fs := st.file_uploader("Evidencia Visual", type=['jpg','png','mp4','mov'], accept_multiple_files=True):
+        # AQUI ES DONDE SE PERMITE VIDEO Y FOTO EN RX
+        if fs := st.file_uploader("Subir Archivos", type=['jpg','png','mp4','mov'], accept_multiple_files=True):
             for f in fs:
                 ftype = "video" if "video" in f.type else "img"
                 archivos.append((ftype, f))
@@ -207,43 +195,39 @@ with col_center:
     audio = st.audio_input("🎙️ Notas de Voz")
     notas = st.text_area("Notas Clínicas:", height=60)
 
-    if st.button("🚀 SINCRONIZAR Y ANALIZAR", type="primary"):
+    if st.button("🚀 ANALIZAR CASO", type="primary"):
         st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
         
-        with st.spinner("🧠 Cruzando: Fármacos + Analítica + Clínica..."):
+        with st.spinner("🧠 Procesando video/imagen y cruzando datos..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel("models/gemini-3-flash-preview")
                 
-                con = []; txt_c = ""
-                txt_meds = ""; txt_tests = ""
+                con = []; txt_meds = ""; txt_tests = ""
 
-                # 1. PROCESAR FÁRMACOS
+                # Procesar Textos
                 if meds_files:
                     for f in meds_files:
-                        if "pdf" in f.type:
-                            r = pypdf.PdfReader(f); txt_meds += "".join([p.extract_text() for p in r.pages])
-                        else: con.append(Image.open(f)); txt_c += "\n[IMG FÁRMACO]\n"
-
-                # 2. PROCESAR ANALÍTICAS/PRUEBAS
+                        if "pdf" in f.type: r = pypdf.PdfReader(f); txt_meds += "".join([p.extract_text() for p in r.pages])
+                        else: con.append(Image.open(f))
                 if tests_files:
                     for f in tests_files:
-                        if "pdf" in f.type:
-                            r = pypdf.PdfReader(f); txt_tests += "".join([p.extract_text() for p in r.pages])
-                        else: con.append(Image.open(f)); txt_c += "\n[IMG ANALITICA/ECG]\n"
-
-                # 3. PROCESAR EVIDENCIA VISUAL
-                if audio: con.append(genai.upload_file(audio, mime_type="audio/wav")); txt_c += "\n[AUDIO]\n"
+                        if "pdf" in f.type: r = pypdf.PdfReader(f); txt_tests += "".join([p.extract_text() for p in r.pages])
+                        else: con.append(Image.open(f))
+                if audio: con.append(genai.upload_file(audio, mime_type="audio/wav"))
                 
+                # Procesar Visual (Video/Foto)
                 img_display = None; img_thermal = None; img_biofilm = None; biofilm_detectado = False
+                has_video = False
                 
                 for t, a in archivos:
                     if t == "video":
+                        has_video = True
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf: tf.write(a.read()); tp = tf.name
                         vf = genai.upload_file(path=tp)
                         while vf.state.name == "PROCESSING": time.sleep(1); vf = genai.get_file(vf.name)
-                        con.append(vf); txt_c += "\n[VIDEO PACIENTE]\n"; os.remove(tp)
-                    else: # Imagen
+                        con.append(vf); os.remove(tp)
+                    else: 
                         img_pil = Image.open(a)
                         if modo == "🩹 Heridas":
                             area = medir_herida(img_pil)
@@ -252,44 +236,40 @@ with col_center:
                             img_biofilm, biofilm_detectado = detectar_biofilm(img_pil)
                             img_display = img_pil
                             con.append(img_pil); con.append(img_thermal)
-                        elif modo == "💊 Farmacia":
+                        elif modo == "💊 Farmacia": img_display = img_pil; con.append(img_pil)
+                        elif modo == "🧴 Dermatología" or "RX" in modo:
                             img_display = img_pil; con.append(img_pil)
                         else:
                             img_final, proc = anonymize_face(img_pil)
-                            if proc: st.session_state.log_privacidad.append("🛡️ Rostro Anonimizado")
                             img_display = img_final; con.append(img_final)
 
-                # PROMPT DE SINCRONIZACIÓN TOTAL
+                coord_txt = ""
+                if st.session_state.punto_cuerpo:
+                    coord_txt = f"El usuario tocó en mapa corporal coords: X={st.session_state.punto_cuerpo['x']}, Y={st.session_state.punto_cuerpo['y']}."
+
                 prompt = f"""
-                Rol: Enfermera Clínica Experta (APN).
-                Contexto: {contexto}. Modo: {modo}.
-                Notas Usuario: "{notas}"
+                Rol: Enfermera APN / Radiólogo. Contexto: {contexto}. Modo: {modo}.
+                {coord_txt}
+                Notas: "{notas}"
                 
-                DATOS CARGADOS:
-                1. 💊 TRATAMIENTO (Texto extraído): {txt_meds}
-                2. 📊 ANALÍTICAS/PRUEBAS (Texto extraído): {txt_tests}
-                3. 📸 IMÁGENES ADJUNTAS: (Fármacos, Analíticas, ECG, Herida).
+                DATA:
+                1. 💊 TRATAMIENTO: {txt_meds}
+                2. 📊 PRUEBAS: {txt_tests}
+                3. 📸 EVIDENCIA VISUAL (Foto o Video).
                 
-                TAREA CRÍTICA (CROSS-CHECK):
-                Cruza TODAS las fuentes de datos. Busca relaciones Causa-Efecto peligrosas.
+                INSTRUCCIONES CLAVE:
+                - Si es RX/TAC/RMN y hay VIDEO: Analiza la secuencia de cortes (scroll). Busca hallazgos que aparecen/desaparecen.
+                - Si es HERIDA: Analiza termografía y biofilm.
+                - CROSS-CHECK: Cruza fármacos con hallazgos visuales.
                 
-                EJEMPLOS DE BÚSQUEDA:
-                - Fármaco + Analítica: ¿Toma diuréticos y el Sodio/Potasio está alterado?
-                - Fármaco + Analítica: ¿Toma estatinas y la CPK/Hígado está alta?
-                - Fármaco + ECG: ¿Toma QT-prolonging drugs y el ECG está alterado?
-                - Fármaco + Herida: ¿Toma corticoides/Sintrom y la herida no cierra o sangra?
-                
-                OUTPUT FORMAT:
-                ### ⚡ RESUMEN DE SINCRONIZACIÓN
-                SYNC_ALERT: [Si hay conflicto Fármaco-Analítica-Clínica, escribe ALERTA MAYÚSCULAS AQUÍ].
-                * **🚨 DIAGNÓSTICO INTEGRAL:**
-                ...
-                ### 🔍 DETALLE DE CRUCE (Fármacos vs Pruebas)
-                * **Correlación Detectada:** [Ej: Enalapril + Potasio 5.8]
-                * **Acción Sugerida:** [Ej: Revisar dosis / Suspender]
+                OUTPUT:
+                ### ⚡ RESUMEN
+                SYNC_ALERT: [ALERTA SI HAY CONFLICTO]
+                * **📍 ZONA:** [Zona deducida]
+                * **🚨 DIAGNÓSTICO:**
                 ...
                 ### 📊 Análisis Visual
-                [Si es herida, barra HTML tejidos: <div class="tissue-bar-container">...]
+                [Si es herida, HTML barra tejidos sin bloques de código]
                 ...
                 """
                 
@@ -303,23 +283,20 @@ with col_center:
                 
                 st.session_state.pdf_bytes = create_pdf(resp.text.replace("*","").replace("#",""))
 
-                if img_display: st.image(img_display, caption="Evidencia Clínica", width=300)
+                if img_display: st.image(img_display, caption="Evidencia", width=300)
+                if has_video: st.info("🎥 Video Procesado por IA")
                 if img_thermal: st.image(img_thermal, caption="Termografía", width=300)
                 if biofilm_detectado:
                     st.image(img_biofilm, caption="Biofilm", width=300)
-                    st.markdown('<div class="biofilm-alert">🔍 SOSPECHA DE BIOFILM</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="biofilm-alert">🔍 SOSPECHA BIOFILM</div>', unsafe_allow_html=True)
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RENDERIZADO
     if st.session_state.resultado_analisis:
-        txt = st.session_state.resultado_analisis
-        
-        # Alerta de Sincronización
+        txt = st.session_state.resultado_analisis.replace("```html", "").replace("```", "")
         sync_match = re.search(r'SYNC_ALERT: (.*)', txt)
         if sync_match and len(sync_match.group(1).strip()) > 5:
             st.markdown(f'<div class="sync-alert">⚠️ {sync_match.group(1)}</div>', unsafe_allow_html=True)
-            
         st.markdown(txt, unsafe_allow_html=True)
     
     if st.session_state.pdf_bytes:
@@ -340,4 +317,5 @@ st.divider()
 if st.button("🔒 Salir"):
     cookie_manager.delete("labmind_secret_key")
     st.session_state.autenticado = False; st.rerun()
+
 
