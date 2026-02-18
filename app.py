@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 54.0 (Clean Audio)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 55.0 (Layout Fix)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -185,7 +185,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 54.0")
+st.title("🩺 LabMind 55.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -317,17 +317,16 @@ with col_center:
 
         st.markdown("---")
         
-        # --- AUDIO LIMPIO (SIN X) ---
-        c_audio, c_tag = st.columns([0.6, 0.4])
-        with c_audio:
-            audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)", key="audio_recorder", label_visibility="collapsed")
-            st.caption("🎙️ Para regrabar, pulsa de nuevo.")
-        with c_tag:
-            st.write("") 
-            nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
-
+        # --- 1. AUDIO ---
+        audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)", key="audio_recorder")
+        
+        # --- 2. NOTAS TEXTO ---
         notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
+        
+        # --- 3. ETIQUETA HISTORIAL ---
+        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304")
 
+        # BOTÓN ANALIZAR
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
@@ -559,7 +558,7 @@ with col_right:
             pred = predecir_cierre()
             st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
         else:
-            st.caption("Sin datos suficientes.")
+            st.caption("Añade datos en 'Ver Evolución' o analiza una herida.")
 
 st.divider()
 if st.button("🔒 Salir"):
