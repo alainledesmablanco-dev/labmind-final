@@ -15,30 +15,31 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 52.0 (Max Space)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 53.0", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
     /* 1. ELIMINAR MARGEN SUPERIOR (TITULO PEGADO ARRIBA) */
     .block-container {
-        padding-top: 1rem !important; /* Reduce drásticamente el espacio arriba */
+        padding-top: 1rem !important;
         padding-bottom: 2rem !important;
     }
     
     /* ESTILO GENERAL BOTONES */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
-    /* 2. BOTÓN BORRAR AUDIO (PERFECTAMENTE ALINEADO A LA DERECHA) */
-    div[data-testid="column"] .stButton button[kind="secondary"] {
-        background-color: #ffebee;
-        color: #c62828;
-        border: 1px solid #ef9a9a;
-        height: 45px; 
-        width: 45px;
-        padding: 0px;
-        margin-top: 28px; /* Truco para bajarlo y alinearlo con el audio_input */
-        float: right;
+    /* 2. BOTÓN BORRAR AUDIO (PERFECTAMENTE INTEGRADO) */
+    /* Apuntamos al botón específico dentro de la columna pequeña */
+    div[data-testid="column"] button[kind="secondary"] {
+        background-color: #ffebee !important;
+        color: #c62828 !important;
+        border: 1px solid #ef9a9a !important;
+        height: 44px !important; /* Altura exacta del audio input */
+        width: 100% !important;
+        padding: 0px !important;
+        margin-top: 0px !important; /* Sin margen arriba */
+        line-height: 1 !important;
     }
 
     /* CAJAS DE RESUMEN */
@@ -197,7 +198,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 52.0")
+st.title("🩺 LabMind 53.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -223,10 +224,12 @@ with col_center:
     
     with tab_analisis:
         st.subheader("1. Selección de Modo")
+        
+        # --- REORDENADO: HERIDAS PRIMERO ---
         modo = st.selectbox("Especialidad:", 
-                     ["🧩 Integral (Analizar Todo)",
-                      "🩹 Heridas / Úlceras", 
-                      "🧴 Dermatología", 
+                     ["🩹 Heridas / Úlceras", 
+                      "🧴 Dermatología",
+                      "🧩 Integral (Analizar Todo)",
                       "💊 Farmacia (Interacciones)", 
                       "📈 ECG (Cardiología)", 
                       "💀 RX / TAC / RMN (Imagen)", 
@@ -238,7 +241,7 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         usar_moneda = False
-        mostrar_imagenes = False # Default global
+        mostrar_imagenes = False 
         
         if modo == "🧩 Integral (Analizar Todo)":
             st.info("🧩 **Modo Integral**: Sube cualquier evidencia.")
@@ -314,22 +317,21 @@ with col_center:
 
         st.markdown("---")
         
-        # --- BARRA DE HERRAMIENTAS DE AUDIO COMPACTA ---
-        c_audio, c_del, c_tag = st.columns([0.5, 0.1, 0.4])
+        # --- AUDIO COMPACTO CON LABEL OCULTO ---
+        st.caption("🎙️ Notas de Voz (Opcional):")
+        c_audio, c_del = st.columns([0.85, 0.15]) # 85% audio, 15% botón
         
         with c_audio:
-            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
+            # LABEL VISIBILITY COLLAPSED para borrar el texto de arriba y ganar espacio
+            audio_val = st.audio_input("Voz", key="audio_recorder", label_visibility="collapsed")
             
         with c_del:
-            # BOTÓN BORRAR AUDIO (ROJO PEQUEÑO ALINEADO A LA DERECHA)
-            st.write("") 
+            # BOTÓN BORRAR AUDIO (ROJO, PEQUEÑO, PEGADO A LA DERECHA)
             if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
                 st.rerun()
         
-        with c_tag:
-            st.write("") 
-            st.write("") 
-            nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
+        # Etiqueta Historial separada
+        nota_historial = st.text_input("🏷️ Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
 
@@ -531,6 +533,7 @@ with col_center:
 
 # --- COLUMNA 3: ESTADÍSTICAS ---
 with col_right:
+    # PLEGADO POR DEFECTO
     with st.expander("📈 Pronóstico (Ver Gráfica)", expanded=False):
         if len(st.session_state.historial_evolucion) > 0:
             df = pd.DataFrame(st.session_state.historial_evolucion)
