@@ -15,30 +15,26 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 56.0 (Manual Data)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 54.0 (Clean Audio)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
+    /* 1. ELIMINAR MARGEN SUPERIOR */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 2rem !important;
+    }
+    
+    /* ESTILO GENERAL BOTONES */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
     
-    /* BOTONES SECUNDARIOS (Borrar audio / Añadir dato) */
-    div[data-testid="column"] button[kind="secondary"] {
-        background-color: #ffebee !important; color: #c62828 !important; border: 1px solid #ef9a9a !important;
-        height: 44px !important; width: 100% !important; padding: 0px !important; margin-top: 0px !important; line-height: 1 !important;
-    }
-    
-    .manual-data-btn button {
-        background-color: #e8f5e9 !important; color: #2e7d32 !important; border: 1px solid #a5d6a7 !important;
-    }
-
-    /* CAJAS RESUMEN */
+    /* CAJAS DE RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
 
-    /* BARRA TEJIDOS */
+    /* BARRA DE TEJIDOS */
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -48,6 +44,7 @@ st.markdown("""
     
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
     
+    /* HISTORIAL */
     .history-card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
     
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
@@ -55,10 +52,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- GESTOR DE ESTADO & COOKIES ---
+# --- GESTOR DE ESTADO ---
 cookie_manager = stx.CookieManager()
-time.sleep(0.1)
-
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
 if "api_key" not in st.session_state: st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state: st.session_state.resultado_analisis = None
@@ -71,6 +66,7 @@ if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 if "history_db" not in st.session_state: st.session_state.history_db = []
 
 # --- LOGIN ---
+time.sleep(0.1)
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
 if not st.session_state.autenticado:
     if cookie_api_key:
@@ -166,35 +162,14 @@ def anonymize_face(pil_image):
         return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), processed
     except: return pil_image, False
 
-# --- LOGICA PREDICCIÓN ACTUALIZADA (MÍNIMO 2 REGISTROS) ---
 def predecir_cierre():
     hist = st.session_state.historial_evolucion
-    # Ordenar por fecha para asegurar cronología
-    try:
-        hist_sorted = sorted(hist, key=lambda x: datetime.datetime.strptime(x['Fecha'], "%d/%m") if len(x['Fecha']) <= 5 else datetime.datetime.now())
-    except:
-        hist_sorted = hist # Fallback
-
-    if len(hist_sorted) < 2: return "Necesito al menos 2 registros (Actual + 1 Previo)."
-    
-    areas = [h['Area'] for h in hist_sorted]
-    
-    # Calcular velocidad de cierre entre el primero y el ultimo
-    reduccion_total = areas[0] - areas[-1]
-    
-    if reduccion_total <= 0: return "⚠️ Estancamiento o empeoramiento."
-    
-    # Días aproximados entre puntos (asumiendo 1 dia si no hay fecha real, o calculando)
-    # Simplificación: Usamos la pendiente media por registro
-    reduccion_promedio = reduccion_total / (len(areas) - 1)
-    
-    if reduccion_promedio <= 0: return "⚠️ Sin avance."
-    
-    dias_restantes = areas[-1] / reduccion_promedio
-    # Ajuste conservador
-    dias_estimados = int(dias_restantes * 1.5) 
-    
-    return f"Cierre estimado en: **{dias_estimados} - {dias_estimados+5} días** (si se mantiene ritmo)."
+    if len(hist) < 3: return "Necesito +3 registros para predecir."
+    areas = [h['Area'] for h in hist]
+    reduccion = (areas[0] - areas[-1]) / len(hist)
+    if reduccion <= 0: return "⚠️ Estancamiento. No hay cierre previsto."
+    dias = areas[-1] / reduccion
+    return f"Cierre estimado en: **{int(dias)} días**."
 
 def create_pdf(texto_analisis):
     class PDF(FPDF):
@@ -210,7 +185,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 56.0")
+st.title("🩺 LabMind 54.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -252,7 +227,7 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         
-        # COOKIES
+        # COOKIES (Si existen)
         cookie_moneda = cookie_manager.get("pref_moneda"); default_moneda = True if cookie_moneda == "True" else False
         cookie_visual = cookie_manager.get("pref_visual"); default_visual = True if cookie_visual == "True" else False
         cookie_fuente = cookie_manager.get("pref_fuente"); idx_fuente = 1 if cookie_fuente == "WebCam" else 0
@@ -269,6 +244,7 @@ with col_center:
                 c4, c5 = st.columns(2)
                 ecg_files = c4.file_uploader("📈 ECG", accept_multiple_files=True, key="int_ecg")
                 rad_files = c5.file_uploader("💀 RX/TAC", accept_multiple_files=True, key="int_rad")
+            
             st.write("📸 **Estado Visual Paciente (Foto/Video):**")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=default_visual, key="chk_visual_int")
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_fuente_int")
@@ -286,14 +262,12 @@ with col_center:
             if usar_moneda != default_moneda: cookie_manager.set("pref_moneda", str(usar_moneda), expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
             if mostrar_imagenes != default_visual: cookie_manager.set("pref_visual", str(mostrar_imagenes), expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
             
-            # --- SECCIÓN DE EVOLUCIÓN (AHORA CON CARGA MANUAL) ---
             with st.expander("⏮️ Ver Evolución (Subir Foto / Añadir Dato)", expanded=False):
                 st.markdown("**Opción A: Subir Foto Previa (Visual)**")
                 prev = st.file_uploader("Foto Previa (Comparativa)", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev")
                 
                 st.markdown("---")
                 st.markdown("**Opción B: Añadir Dato Histórico (Para Gráfica)**")
-                st.caption("Si tienes datos de días anteriores en la historia clínica, añádelos aquí para activar la predicción.")
                 c_date, c_area, c_add = st.columns([0.4, 0.4, 0.2])
                 with c_date:
                     date_manual = st.date_input("Fecha", value=datetime.date.today() - datetime.timedelta(days=7))
@@ -302,13 +276,9 @@ with col_center:
                 with c_add:
                     st.write("")
                     st.write("")
-                    if st.button("➕ Añadir", key="btn_add_manual", type="secondary"):
-                        # Añadir al historial
-                        st.session_state.historial_evolucion.append({
-                            "Fecha": date_manual.strftime("%d/%m"),
-                            "Area": area_manual
-                        })
-                        st.toast("✅ Dato histórico añadido")
+                    if st.button("➕", key="btn_add_manual"):
+                        st.session_state.historial_evolucion.append({"Fecha": date_manual.strftime("%d/%m"), "Area": area_manual})
+                        st.toast("✅ Dato añadido")
 
                 if prev:
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
@@ -347,18 +317,14 @@ with col_center:
 
         st.markdown("---")
         
-        # --- AUDIO COMPACTO ---
-        c_audio, c_del, c_tag = st.columns([0.5, 0.1, 0.4])
+        # --- AUDIO LIMPIO (SIN X) ---
+        c_audio, c_tag = st.columns([0.6, 0.4])
         with c_audio:
-            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder")
-        with c_del:
-            st.write("") 
-            if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
-                st.rerun()
+            audio_val = st.audio_input("🎙️ Notas de Voz (Opcional)", key="audio_recorder", label_visibility="collapsed")
+            st.caption("🎙️ Para regrabar, pulsa de nuevo.")
         with c_tag:
             st.write("") 
-            st.write("") 
-            nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
+            nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
 
@@ -545,7 +511,6 @@ with col_center:
                             st.session_state.chat_messages.append({"role": "assistant", "content": full_resp.text})
                         except Exception as e: st.error(f"Error chat: {e}")
                 
-                # Respuesta Chip
                 if chip_prompt:
                     st.session_state.chat_messages.append({"role": "user", "content": chip_prompt})
                     with st.chat_message("user"): st.markdown(chip_prompt)
@@ -594,7 +559,7 @@ with col_right:
             pred = predecir_cierre()
             st.markdown(f'<div class="prediction-box">🔮 <b>IA Supervivencia:</b><br>{pred}</div>', unsafe_allow_html=True)
         else:
-            st.caption("Añade datos en 'Ver Evolución' o analiza una herida.")
+            st.caption("Sin datos suficientes.")
 
 st.divider()
 if st.button("🔒 Salir"):
