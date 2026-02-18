@@ -15,53 +15,89 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 53.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 54.0 (Ultra Compact)", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS ---
+# --- ESTILOS CSS (MODO COMPACTO) ---
 st.markdown("""
 <style>
-    /* 1. ELIMINAR MARGEN SUPERIOR (TITULO PEGADO ARRIBA) */
+    /* 1. MÁXIMA COMPACTACIÓN GLOBAL */
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
+        padding-top: 0.5rem !important; /* Casi pegado arriba */
+        padding-bottom: 1rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+    
+    /* Reducir espacio entre elementos verticales de Streamlit */
+    div[data-testid="stVerticalBlock"] > div {
+        margin-bottom: -0.5rem !important; /* Truco para subir elementos */
+        gap: 0.2rem !important;
+    }
+    
+    /* Ajuste de títulos para que no coman espacio */
+    h1, h2, h3 {
+        margin-bottom: 0.2rem !important;
+        padding-top: 0rem !important;
     }
     
     /* ESTILO GENERAL BOTONES */
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; }
+    .stButton>button { 
+        width: 100%; 
+        border-radius: 6px; 
+        font-weight: bold; 
+        background-color: #0066cc; 
+        color: white; 
+        height: 2.5rem; /* Botones un poco más bajitos */
+        min-height: 0px;
+        padding-top: 0px;
+        padding-bottom: 0px;
+    }
     
-    /* 2. BOTÓN BORRAR AUDIO (PERFECTAMENTE INTEGRADO) */
-    /* Apuntamos al botón específico dentro de la columna pequeña */
+    /* 2. BOTÓN BORRAR AUDIO (Ajustado al modo compacto) */
     div[data-testid="column"] button[kind="secondary"] {
         background-color: #ffebee !important;
         color: #c62828 !important;
         border: 1px solid #ef9a9a !important;
-        height: 44px !important; /* Altura exacta del audio input */
+        height: 44px !important;
         width: 100% !important;
         padding: 0px !important;
-        margin-top: 0px !important; /* Sin margen arriba */
+        margin-top: 0px !important;
         line-height: 1 !important;
     }
 
-    /* CAJAS DE RESUMEN */
-    .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
-    .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
-    .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
+    /* CAJAS DE RESUMEN (MÁS FINAS) */
+    .diagnosis-box { 
+        background-color: #e3f2fd; border-left: 5px solid #2196f3; 
+        padding: 8px; /* Menos relleno */
+        border-radius: 6px; margin-bottom: 5px; color: #0d47a1; font-family: sans-serif; font-size: 0.9rem;
+    }
+    .action-box { 
+        background-color: #ffebee; border-left: 5px solid #f44336; 
+        padding: 8px; 
+        border-radius: 6px; margin-bottom: 5px; color: #b71c1c; font-family: sans-serif; font-size: 0.9rem;
+    }
+    .material-box { 
+        background-color: #e8f5e9; border-left: 5px solid #4caf50; 
+        padding: 8px; 
+        border-radius: 6px; margin-bottom: 10px; color: #1b5e20; font-family: sans-serif; font-size: 0.9rem;
+    }
 
-    /* BARRA DE TEJIDOS */
-    .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
-    .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    /* BARRA DE TEJIDOS COMPACTA */
+    .tissue-labels { display: flex; width: 100%; margin-bottom: 1px; }
+    .tissue-label-text { font-size: 0.7rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; }
+    .tissue-bar-container { display: flex; width: 100%; height: 15px; /* Más fina */ border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
     .tissue-gran { background-color: #ef5350; height: 100%; }
     .tissue-slough { background-color: #fdd835; height: 100%; }
     .tissue-nec { background-color: #212121; height: 100%; }
     
-    .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
+    .sync-alert { border: 2px solid #d32f2f; padding: 8px; border-radius: 8px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 5px; animation: pulse 2s infinite; font-size: 0.9rem;}
     
-    /* HISTORIAL */
-    .history-card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; margin-bottom: 10px; background-color: #f9f9f9; }
+    /* HISTORIAL COMPACTO */
+    .history-card { border: 1px solid #ddd; padding: 5px; border-radius: 6px; margin-bottom: 5px; background-color: #f9f9f9; }
     
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
-    [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
+    [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.8rem; color: #555; display: block; }
+    [data-testid='stFileUploaderDropzone'] { padding: 0.5rem; min-height: 80px; } /* Uploader más bajo */
 </style>
 """, unsafe_allow_html=True)
 
@@ -198,7 +234,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 53.0")
+st.title("🩺 LabMind 54.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1: CONTEXTO GLOBAL ---
@@ -215,7 +251,7 @@ with col_left:
     st.divider()
     
     with st.expander("📚 Protocolo de Unidad (Opcional)", expanded=False):
-        st.caption("Sube el PDF/Foto de tu guía para que la IA la respete.")
+        st.caption("Sube el PDF/Foto de tu guía.")
         proto_file = st.file_uploader("Subir", type=["pdf", "jpg", "png"], key="global_proto")
 
 # --- COLUMNA 2: NÚCLEO CENTRAL ---
@@ -224,8 +260,6 @@ with col_center:
     
     with tab_analisis:
         st.subheader("1. Selección de Modo")
-        
-        # --- REORDENADO: HERIDAS PRIMERO ---
         modo = st.selectbox("Especialidad:", 
                      ["🩹 Heridas / Úlceras", 
                       "🧴 Dermatología",
@@ -241,7 +275,7 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         usar_moneda = False
-        mostrar_imagenes = False 
+        mostrar_imagenes = False # Default global
         
         if modo == "🧩 Integral (Analizar Todo)":
             st.info("🧩 **Modo Integral**: Sube cualquier evidencia.")
@@ -267,10 +301,12 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras":
             st.info("🩹 **Modo Heridas**")
-            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+            # --- ORDEN COMPACTO ---
+            c_check1, c_check2 = st.columns(2)
+            with c_check1: usar_moneda = st.checkbox("🪙 Usar moneda 1€")
+            with c_check2: mostrar_imagenes = st.checkbox("👁️ Ver Biofilm/Térmica", value=False)
             
-            with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
+            with st.expander("⏮️ Ver Evolución (Subir Previo)", expanded=False):
                 if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_prev"):
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
             with st.expander("💊 Medicación / Analítica (Opcional)", expanded=False):
@@ -287,10 +323,11 @@ with col_center:
 
         elif modo == "🧴 Dermatología":
             st.info("🧴 **Modo Dermatología**")
-            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para medir")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual (Biofilm/Térmica)", value=False)
+            c_check1, c_check2 = st.columns(2)
+            with c_check1: usar_moneda = st.checkbox("🪙 Usar moneda 1€")
+            with c_check2: mostrar_imagenes = st.checkbox("👁️ Ver Biofilm/Térmica", value=False)
             
-            with st.expander("⏮️ Ver Evolución (Subir Foto/Video Previo)", expanded=False):
+            with st.expander("⏮️ Ver Evolución (Subir Previo)", expanded=False):
                 if prev := st.file_uploader("Estado Previo", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="d_prev"):
                     for p in prev: archivos.append(("prev_video" if "video" in p.type else "prev_img", p))
             st.write("📸 **Estado ACTUAL (Foto/Video):**")
@@ -317,21 +354,18 @@ with col_center:
 
         st.markdown("---")
         
-        # --- AUDIO COMPACTO CON LABEL OCULTO ---
-        st.caption("🎙️ Notas de Voz (Opcional):")
-        c_audio, c_del = st.columns([0.85, 0.15]) # 85% audio, 15% botón
-        
+        # --- BARRA DE HERRAMIENTAS COMPACTA ---
+        c_audio, c_del, c_tag = st.columns([0.5, 0.1, 0.4])
         with c_audio:
-            # LABEL VISIBILITY COLLAPSED para borrar el texto de arriba y ganar espacio
-            audio_val = st.audio_input("Voz", key="audio_recorder", label_visibility="collapsed")
-            
+            audio_val = st.audio_input("🎙️ Voz", key="audio_recorder", label_visibility="collapsed")
         with c_del:
-            # BOTÓN BORRAR AUDIO (ROJO, PEQUEÑO, PEGADO A LA DERECHA)
+            st.write("") 
             if st.button("❌", help="Borrar audio", key="btn_clear_audio", type="secondary"):
                 st.rerun()
-        
-        # Etiqueta Historial separada
-        nota_historial = st.text_input("🏷️ Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
+        with c_tag:
+            st.write("") 
+            st.write("") 
+            nota_historial = st.text_input("Etiqueta Historial:", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         notas = st.text_area("Notas Clínicas (Texto):", height=60, placeholder="Escribe síntomas, alergias...")
 
