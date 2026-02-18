@@ -1,11 +1,10 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image, ImageDraw
+from PIL import Image
 import pypdf
 import tempfile
 import time
 import os
-import io
 from fpdf import FPDF
 import datetime
 import re
@@ -16,30 +15,54 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 60.0 (Multi-Proto)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 61.0 (Fix & Fit)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
-    div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; padding-bottom: 0px !important; }
-    div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
+    /* 1. MARGEN SUPERIOR MÍNIMO */
+    .block-container {
+        padding-top: 0.5rem !important;
+        padding-bottom: 2rem !important;
+    }
+    
+    /* 2. COMPRESIÓN VERTICAL GLOBAL */
+    div[data-testid="stVerticalBlock"] > div {
+        gap: 0rem !important; 
+        padding-bottom: 0px !important;
+    }
+    
+    /* 3. CLASE PARA "TIRAR HACIA ARRIBA" EL CONTENIDO (Elimina el hueco negro) */
+    .pull-up {
+        margin-top: -25px !important;
+        margin-bottom: 5px !important;
+        height: 1px !important;
+        display: block !important;
+    }
+    
+    /* ESTILOS GENERALES */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; margin-top: 10px; }
+    
+    /* CAJAS RESUMEN */
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
+
+    /* BARRA TEJIDOS */
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     .tissue-gran { background-color: #ef5350; height: 100%; }
     .tissue-slough { background-color: #fdd835; height: 100%; }
     .tissue-nec { background-color: #212121; height: 100%; }
+    
     .sync-alert { border: 2px solid #d32f2f; padding: 15px; border-radius: 10px; background-color: #fff8f8; color: #b71c1c; font-weight: bold; margin-bottom: 10px; animation: pulse 2s infinite; }
+    
     .proto-success { background-color: #e8f5e9; color: #2e7d32; padding: 8px; border-radius: 5px; font-size: 0.85rem; border: 1px solid #c8e6c9; margin-bottom: 5px; }
+    
     [data-testid='stFileUploaderDropzone'] { padding: 5px !important; min-height: 60px; }
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
-    .tight-space { margin-top: -15px !important; margin-bottom: -15px !important; padding: 0px !important; height: 1px !important; background-color: #e0e0e0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -176,7 +199,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 60.0")
+st.title("🩺 LabMind 61.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -187,11 +210,8 @@ with col_left:
     st.session_state.punto_cuerpo = seleccion_zona
     
     with st.expander("📚 Protocolo Unidad", expanded=False):
-        # 1. BUSCAR PROTOCOLO FIJO MULTIFORMATO
-        fixed_proto_path = None
-        detected_name = ""
-        
-        # Orden de prioridad: PDF -> JPG -> PNG
+        # 1. BUSCAR PROTOCOLO FIJO
+        fixed_proto_path = None; detected_name = ""
         if os.path.exists("protocolo.pdf"): fixed_proto_path = "protocolo.pdf"; detected_name = "PDF"
         elif os.path.exists("protocolo.jpg"): fixed_proto_path = "protocolo.jpg"; detected_name = "JPG"
         elif os.path.exists("protocolo.png"): fixed_proto_path = "protocolo.png"; detected_name = "PNG"
@@ -203,7 +223,6 @@ with col_left:
         else:
             st.caption("Guarda 'protocolo.jpg' o '.pdf' en la carpeta.")
 
-        # 2. UPLOADER
         proto_uploaded = st.file_uploader("Subir (Sobrescribe Fijo)", type=["pdf", "jpg", "png"], key="global_proto")
 
 # --- COLUMNA 2 ---
@@ -217,7 +236,8 @@ with col_center:
                      ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
-        st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
+        # --- AQUÍ: "TIRAMOS" DEL CONTENIDO HACIA ARRIBA PARA BORRAR EL ESPACIO ---
+        st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
         
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
@@ -235,7 +255,7 @@ with col_center:
                 labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
             st.write("📸 **Visual:**")
             mostrar_imagenes = st.checkbox("👁️ Mostrar Análisis Visual", value=default_visual, key="chk_visual_int")
-            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_fuente_int")
+            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_source_integral")
             if fuente_label == "📸 WebCam":
                 if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
             else:
@@ -264,7 +284,10 @@ with col_center:
                 meds_files = st.file_uploader("Docs", accept_multiple_files=True, key="w_meds")
             
             st.write("📸 **Estado ACTUAL:**")
-            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_fuente")
+            
+            # --- KEY CORREGIDA PARA EVITAR DUPLICATE KEY ---
+            fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=idx_fuente, key="rad_source_wounds")
+            
             actual_fuente_val = "WebCam" if "WebCam" in fuente_label else "Archivo"
             if actual_fuente_val != cookie_fuente: cookie_manager.set("pref_fuente", actual_fuente_val, expires_at=datetime.datetime.now()+datetime.timedelta(days=30))
 
@@ -286,16 +309,18 @@ with col_center:
 
         st.markdown('<div class="tight-space"></div>', unsafe_allow_html=True)
         
-        # --- AUDIO COMPACTO ---
-        c_audio, c_tag = st.columns([0.6, 0.4])
-        with c_audio:
-            audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        with c_tag:
-            st.write("") 
-            nota_historial = st.text_input("🏷️ Etiqueta:", placeholder="Ej: Cama 304", label_visibility="collapsed")
-
+        # --- ORDEN VERTICAL MODIFICADO ---
+        
+        # 1. AUDIO
+        audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
+        
+        # 2. NOTAS TEXTO
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
+        
+        # 3. ETIQUETA HISTORIAL
+        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
+        # BOTÓN ANALIZAR
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
@@ -311,17 +336,13 @@ with col_center:
                     final_proto_obj = None
                     is_local = False
                     
-                    if proto_uploaded: # 1. Prioridad: Subido manual
-                        final_proto_obj = proto_uploaded
-                    elif using_fixed_proto and fixed_proto_path: # 2. Prioridad: Fijo
+                    if proto_uploaded: final_proto_obj = proto_uploaded
+                    elif using_fixed_proto and fixed_proto_path:
                         final_proto_obj = fixed_proto_path
                         is_local = True
 
                     if final_proto_obj:
-                        # Si es local, lo abrimos. Si es subido, ya está abierto.
-                        # Determinamos si es PDF o Imagen por extensión o tipo
                         is_pdf = False
-                        
                         if is_local:
                             if fixed_proto_path.endswith(".pdf"): is_pdf = True
                             file_handle = open(fixed_proto_path, "rb")
@@ -333,10 +354,9 @@ with col_center:
                             r = pypdf.PdfReader(file_handle)
                             txt_proto += "".join([p.extract_text() for p in r.pages])
                         else:
-                            # Es imagen (JPG/PNG), la añadimos al contexto visual
                             img_proto = Image.open(file_handle)
                             con.append(img_proto)
-                            txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]" # Aviso al prompt
+                            txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]"
                     
                     # Procesar Archivos
                     for fs in [meds_files, labs_files, reports_files]:
@@ -350,8 +370,7 @@ with col_center:
                     img_display = None; img_thermal = None; img_prev_display = None
                     
                     for label, a in archivos:
-                        if "video" in label: # Video dummy handle
-                            pass 
+                        if "video" in label: pass 
                         else: 
                             img_pil = Image.open(a)
                             if ("Heridas" in modo or "Dermatología" in modo):
@@ -370,7 +389,7 @@ with col_center:
 
                     prompt = f"""
                     Rol: APN. Modo: {modo}. Zona: {st.session_state.punto_cuerpo}. Notas: "{notas}"
-                    INPUTS: FARMACIA: {txt_meds} PROTOCOLO TEXTO: {txt_proto}
+                    INPUTS: FARMACIA: {txt_meds} PROTOCOLO: {txt_proto}
                     INSTRUCCIONES:
                     1. RESUMEN:
                     <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO:</b><br>[Texto]</div>
@@ -393,7 +412,6 @@ with col_center:
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     st.session_state.resultado_analisis = resp.text
                     
-                    # Guardar Historial
                     new_entry = { "id": str(uuid.uuid4()), "date": datetime.datetime.now().strftime("%d/%m %H:%M"), "mode": modo, "note": nota_historial if nota_historial else "Sin etiqueta", "result": resp.text }
                     st.session_state.history_db.append(new_entry)
                     
