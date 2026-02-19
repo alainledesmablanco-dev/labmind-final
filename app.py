@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 72.0 (Smart Routing)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 74.0 (Fast Reset)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -63,6 +63,9 @@ if "history_db" not in st.session_state: st.session_state.history_db = []
 if "img_previo" not in st.session_state: st.session_state.img_previo = None 
 if "img_actual" not in st.session_state: st.session_state.img_actual = None 
 if "img_ghost" not in st.session_state: st.session_state.img_ghost = None   
+
+# --- IDENTIFICADOR DE CASO (PARA LIMPIEZA PROFUNDA) ---
+if "case_id" not in st.session_state: st.session_state.case_id = 0
 
 if "prefs_loaded" not in st.session_state:
     try:
@@ -306,7 +309,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 72.0")
+st.title("🩺 LabMind 74.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -329,7 +332,8 @@ with col_left:
         else:
             st.caption("Guarda 'protocolo.jpg' o '.pdf' en la carpeta.")
 
-        proto_uploaded = st.file_uploader("Subir (Sobrescribe Fijo)", type=["pdf", "jpg", "png"], key="global_proto")
+        # Añadida ID dinámica para forzar reseteo al dar Nuevo Caso
+        proto_uploaded = st.file_uploader("Subir (Sobrescribe Fijo)", type=["pdf", "jpg", "png"], key=f"global_proto_{st.session_state.case_id}")
 
 # --- COLUMNA 2 ---
 with col_center:
@@ -347,20 +351,21 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         
+        # LÓGICA MODOS (CON KEYS DINÁMICAS BASADAS EN case_id)
         if modo == "🧩 Integral (Analizar Todo)":
             with st.expander("📂 Documentación", expanded=False):
                 c1, c2 = st.columns(2)
-                meds_files = c1.file_uploader("💊 Fármacos", accept_multiple_files=True, key="int_meds")
-                labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
+                meds_files = c1.file_uploader("💊 Fármacos", accept_multiple_files=True, key=f"int_meds_{st.session_state.case_id}")
+                labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key=f"int_labs_{st.session_state.case_id}")
             st.write("📸 **Visual / Videos:**")
             
             mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=st.session_state.pref_fuente, key="rad_src_integral", on_change=update_cookie_fuente)
             
             if fuente_label == "📸 WebCam":
-                if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
+                if f := st.camera_input("Foto Paciente", key=f"cam_{st.session_state.case_id}"): archivos.append(("cam", f))
             else:
-                if fs := st.file_uploader("Subir Imágenes o Videos", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
+                if fs := st.file_uploader("Subir Imágenes o Videos", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key=f"int_main_{st.session_state.case_id}"):
                     for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
@@ -368,7 +373,7 @@ with col_center:
             mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             
             with st.expander("⏮️ Ver Evolución", expanded=False):
-                prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key="w_prev")
+                prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key=f"w_prev_{st.session_state.case_id}")
                 if prev:
                     try:
                         st.session_state.img_previo = Image.open(prev[0])
@@ -377,14 +382,14 @@ with col_center:
                     except: pass
 
                 c_d, c_a, c_b = st.columns([0.4,0.4,0.2])
-                with c_d: d_m = st.date_input("Fecha", value=datetime.date.today()-datetime.timedelta(days=7))
-                with c_a: a_m = st.number_input("Área (cm²)", min_value=0.0, step=0.1)
+                with c_d: d_m = st.date_input("Fecha", value=datetime.date.today()-datetime.timedelta(days=7), key=f"d_m_{st.session_state.case_id}")
+                with c_a: a_m = st.number_input("Área (cm²)", min_value=0.0, step=0.1, key=f"a_m_{st.session_state.case_id}")
                 with c_b: 
                     st.write(""); st.write("")
-                    if st.button("➕", key="btn_add"): st.session_state.historial_evolucion.append({"Fecha": d_m.strftime("%d/%m"), "Area": a_m})
+                    if st.button("➕", key=f"btn_add_{st.session_state.case_id}"): st.session_state.historial_evolucion.append({"Fecha": d_m.strftime("%d/%m"), "Area": a_m})
 
             with st.expander("💊 Contexto (Opcional)", expanded=False):
-                meds_files = st.file_uploader("Docs", accept_multiple_files=True, key="w_meds")
+                meds_files = st.file_uploader("Docs", accept_multiple_files=True, key=f"w_meds_{st.session_state.case_id}")
             
             st.write("📸 **Estado ACTUAL:**")
             
@@ -396,27 +401,27 @@ with col_center:
             if fuente_label == "📸 WebCam":
                 if st.session_state.img_previo and "Heridas" in modo:
                     st.image(st.session_state.img_previo, caption="REFERENCIA (Intenta imitar este ángulo)", width=150)
-                if f := st.camera_input("Foto"): archivos.append(("cam", f))
+                if f := st.camera_input("Foto", key=f"cam_w_{st.session_state.case_id}"): archivos.append(("cam", f))
             else:
-                if fs := st.file_uploader("Subir", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="w_img"):
+                if fs := st.file_uploader("Subir", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key=f"w_img_{st.session_state.case_id}"):
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
-        elif modo == "💊 Farmacia": meds_files = st.file_uploader("Receta", accept_multiple_files=True, key="p_docs")
+        elif modo == "💊 Farmacia": meds_files = st.file_uploader("Receta", accept_multiple_files=True, key=f"p_docs_{st.session_state.case_id}")
         elif modo == "📈 ECG": 
-            if fs:=st.file_uploader("ECG", type=['jpg','pdf'], accept_multiple_files=True): 
+            if fs:=st.file_uploader("ECG", type=['jpg','pdf'], accept_multiple_files=True, key=f"ecg_{st.session_state.case_id}"): 
                 for f in fs: archivos.append(("img",f))
         elif modo == "💀 RX/TAC/Resonancia": 
             st.info("💀 **Modo Imagenología**: Sube múltiples imágenes (RX) o videos (TAC/Resonancia)")
-            if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
+            if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key=f"rx_{st.session_state.case_id}"): 
                 for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
                 
-        elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
+        elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key=f"rep_docs_{st.session_state.case_id}")
 
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
         
-        audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
-        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
+        audio_val = st.audio_input("🎙️ Notas de Voz", key=f"audio_recorder_{st.session_state.case_id}", label_visibility="collapsed")
+        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...", key=f"notas_{st.session_state.case_id}")
+        nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed", key=f"etiq_{st.session_state.case_id}")
 
         galeria_avanzada = []
 
@@ -513,7 +518,6 @@ with col_center:
                                 img_final, proc = anonymize_face(img_pil)
                                 con.append(img_final)
 
-                    # --- LÓGICA DINÁMICA DEL PROMPT SEGÚN EL MODO (ENRUTAMIENTO AISLADO) ---
                     if "Heridas" in modo or "Dermatología" in modo:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
                         instruccion_modo = 'Enfoque: Cuidado de heridas y piel. En la caja "CURA", **EXTRAE Y RECOMIENDA** productos con **MARCA COMERCIAL** basándote EXCLUSIVAMENTE en el protocolo adjunto y la idoneidad clínica.'
@@ -593,13 +597,7 @@ with col_center:
                 for m in st.session_state.chat_messages:
                     with st.chat_message(m["role"]): st.markdown(m["content"])
                 
-                col_c1, col_c2, col_c3 = st.columns(3)
-                cp = None
-                if col_c1.button("📝 Alta", key="c1", type="secondary"): cp="Informe Alta"
-                if col_c2.button("🩹 Cuidados", key="c2", type="secondary"): cp="Plan Cuidados"
-                if col_c3.button("⚠️ Alarma", key="c3", type="secondary"): cp="Signos Alarma"
-
-                if p := st.chat_input("Duda..."):
+                if p := st.chat_input("Escribe tu duda sobre este caso..."):
                     st.session_state.chat_messages.append({"role": "user", "content": p})
                     with st.chat_message("user"): st.markdown(p)
                     with st.chat_message("assistant"):
@@ -609,20 +607,26 @@ with col_center:
                             st.markdown(r.text)
                             st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
                         except: st.error("Error chat")
-                
-                if cp:
-                    st.session_state.chat_messages.append({"role": "user", "content": cp})
-                    with st.chat_message("user"): st.markdown(cp)
-                    with st.chat_message("assistant"):
-                        try:
-                            chat = genai.GenerativeModel("models/gemini-3-flash-preview")
-                            r = chat.generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{cp}")
-                            st.markdown(r.text)
-                            st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
-                        except: st.error("Error chat")
 
-        if st.session_state.pdf_bytes:
-            st.download_button("📥 PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
+            # --- BOTONES FINALES DE ACCIÓN (NUEVO CASO) ---
+            st.markdown("---")
+            c_down, c_new = st.columns(2)
+            with c_down:
+                if st.session_state.pdf_bytes:
+                    st.download_button("📥 Descargar PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf", use_container_width=True)
+            with c_new:
+                if st.button("🔄 NUEVO CASO (Limpiar Pantalla)", type="secondary", use_container_width=True):
+                    # Borrado Profundo
+                    st.session_state.resultado_analisis = None
+                    st.session_state.pdf_bytes = None
+                    st.session_state.historial_evolucion = []
+                    st.session_state.area_herida = 0.0
+                    st.session_state.chat_messages = []
+                    st.session_state.img_previo = None
+                    st.session_state.img_actual = None
+                    st.session_state.img_ghost = None
+                    st.session_state.case_id += 1 # Cambia los IDs de los widgets para vaciarlos físicamente
+                    st.rerun()
 
     with tab_historial:
         if not st.session_state.history_db: st.info("Vacío.")
