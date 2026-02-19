@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 77.0 (Main Clinical Viewer)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 82.0 (Digital Twin)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -37,8 +37,11 @@ st.markdown("""
     .tissue-nec { background-color: #212121; height: 100%; }
     
     .ghost-alert { background-color: #e0f7fa; color: #006064; padding: 10px; border-radius: 8px; border: 1px dashed #00bcd4; margin-bottom: 10px; text-align: center; font-weight: bold; }
-    .pull-up { margin-top: -25px !important; margin-bottom: 5px !important; height: 1px !important; display: block !important; }
+    .prediction-box { background-color: #f8f9fa; border-left: 5px solid #6c757d; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+    .push-badge { display: inline-block; background-color: #3f51b5; color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; margin-bottom: 10px;}
+    .biofilm-alert { color: #d32f2f; font-weight: bold; font-size: 0.85rem; margin-top: 5px; }
     
+    .pull-up { margin-top: -25px !important; margin-bottom: 5px !important; height: 1px !important; display: block !important; }
     [data-testid='stFileUploaderDropzone'] { padding: 5px !important; min-height: 60px; }
     [data-testid='stFileUploaderDropzone'] div div span { display: none; }
     [data-testid='stFileUploaderDropzone'] div div::after { content: "📂 Adjuntar"; font-size: 0.9rem; color: #555; display: block; }
@@ -56,15 +59,23 @@ if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
 if "historial_evolucion" not in st.session_state: st.session_state.historial_evolucion = []
 if "area_herida" not in st.session_state: st.session_state.area_herida = 0.0
 if "log_privacidad" not in st.session_state: st.session_state.log_privacidad = []
-if "punto_cuerpo" not in st.session_state: st.session_state.punto_cuerpo = "No especificado"
+if "punto_cuerpo" not in st.session_state: st.session_state.punto_cuerpo = "No especificada"
 if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 if "history_db" not in st.session_state: st.session_state.history_db = []
 
-# Variables visuales globales
 if "img_previo" not in st.session_state: st.session_state.img_previo = None 
 if "img_actual" not in st.session_state: st.session_state.img_actual = None 
 if "img_ghost" not in st.session_state: st.session_state.img_ghost = None   
-if "img_marcada" not in st.session_state: st.session_state.img_marcada = None # NUEVA PARA VISOR
+if "img_marcada" not in st.session_state: st.session_state.img_marcada = None 
+if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
+if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
+
+# Variables Clínicas NLP + Labs (V82.0)
+if "patient_risk_factor" not in st.session_state: st.session_state.patient_risk_factor = 1.0
+if "patient_risk_reason" not in st.session_state: st.session_state.patient_risk_reason = "Estándar"
+if "lab_albumin" not in st.session_state: st.session_state.lab_albumin = None
+if "lab_hba1c" not in st.session_state: st.session_state.lab_hba1c = None
+if "lab_itb" not in st.session_state: st.session_state.lab_itb = None
 
 if "prefs_loaded" not in st.session_state:
     try:
@@ -114,20 +125,13 @@ if not st.session_state.autenticado:
 # ==========================================
 
 def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
-    """
-    Busca coordenadas BBOX y TIMESTAMPS generadas por IA.
-    Si hay un video y un TIMESTAMP, extrae ese fotograma exacto y dibuja.
-    Si no, usa la imagen principal (img_pil).
-    """
     patron = r'(?:TIMESTAMP:\s*([\d\.]+)\s*)?BBOX:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*LABEL:\s*([^\n<]+)'
     matches = re.findall(patron, texto)
-    
-    if not matches:
-        return None, texto, False
+    if not matches: return None, texto, False
         
     base_img = img_pil
-    
     primer_ts = matches[0][0]
+    
     if primer_ts and video_path:
         try:
             ts_segundos = float(primer_ts)
@@ -137,14 +141,11 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
                 frame_objetivo = int(ts_segundos * fps)
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_objetivo)
                 ret, frame = cap.read()
-                if ret:
-                    base_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                if ret: base_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             cap.release()
-        except Exception as e:
-            print("Error extrayendo frame del video:", e)
+        except: pass
             
-    if base_img is None:
-        return None, re.sub(patron, '', texto).strip(), False
+    if base_img is None: return None, re.sub(patron, '', texto).strip(), False
 
     img_cv = cv2.cvtColor(np.array(base_img.convert('RGB')), cv2.COLOR_RGB2BGR)
     h, w = img_cv.shape[:2]
@@ -167,8 +168,7 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
             
             cv2.rectangle(img_cv, (x1, max(0, y1-th-15)), (x1+tw+10, y1), (0, 0, 255), -1)
             cv2.putText(img_cv, texto_label, (x1+5, max(0, y1-7)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
-        except Exception as e:
-            pass
+        except: pass
             
     img_res = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     texto_limpio = re.sub(patron, '', texto)
@@ -214,9 +214,8 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         circles = np.round(circles[0, :]).astype("int")
         for (x, y, r) in circles:
             cv2.circle(img_calibrada, (x, y), r, (0, 255, 0), 4)
-            cv2.putText(img_calibrada, "1 EUR (Calibrado)", (x - 40, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(img_calibrada, "1 EUR", (x - 40, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             pixels_per_cm = (r * 2) / 2.325
-            
             mask_moneda = np.zeros_like(gray)
             cv2.circle(mask_moneda, (x, y), int(r*0.6), 255, -1)
             mean_moneda = cv2.mean(img_bgr, mask=mask_moneda)[:3]
@@ -247,6 +246,7 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     fitzpatrick = "No evaluable"; estado_bordes = "No evaluable"; riesgo_isquemia = "No evaluable"
     img_segmentada = img_calibrada.copy()
     img_depth = None
+    p_nec, p_esf, p_gra = 0, 0, 0
 
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
@@ -274,10 +274,15 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         m_esf = cv2.inRange(roi_hsv, (15, 50, 50), (35, 255, 255))
         m_gra = cv2.inRange(roi_hsv, (0, 50, 61), (10, 255, 255)) + cv2.inRange(roi_hsv, (170, 50, 61), (180, 255, 255))
         
+        total_wound_pixels = cv2.countNonZero(mask_roi)
+        if total_wound_pixels > 0:
+            p_nec = (cv2.countNonZero(cv2.bitwise_and(m_nec, mask_roi)) / total_wound_pixels) * 100
+            p_esf = (cv2.countNonZero(cv2.bitwise_and(m_esf, mask_roi)) / total_wound_pixels) * 100
+            p_gra = (cv2.countNonZero(cv2.bitwise_and(m_gra, mask_roi)) / total_wound_pixels) * 100
+
         overlay = img_segmentada.copy()
         overlay[m_nec > 0] = [0, 0, 0]; overlay[m_esf > 0] = [0, 255, 255]; overlay[m_gra > 0] = [0, 0, 255]     
         img_segmentada = cv2.addWeighted(img_calibrada, 0.6, overlay, 0.4, 0)
-        cv2.putText(img_segmentada, "MAPA TEJIDOS", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
         x,y,w,h = cv2.boundingRect(best_contour)
         roi_gray = cv2.cvtColor(img_calibrada[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
@@ -286,6 +291,7 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
 
     return {
         "area": area_final, "fitzpatrick": fitzpatrick, "bordes": estado_bordes, "isquemia": riesgo_isquemia,
+        "p_nec": p_nec, "p_esf": p_esf, "p_gra": p_gra,
         "img_calibrada": Image.fromarray(cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2RGB)),
         "img_segmentada": Image.fromarray(cv2.cvtColor(img_segmentada, cv2.COLOR_BGR2RGB)),
         "img_depth": img_depth
@@ -330,18 +336,164 @@ def alinear_imagenes(img_ref_pil, img_mov_pil):
         return Image.fromarray(aligned_cv), Image.fromarray(blend_cv)
     except: return img_mov_pil, None
 
-def predecir_cierre():
+# --- MOTOR ORÁCULO CLÍNICO GEMELO DIGITAL (V82.0) ---
+def predecir_cierre_inteligente():
     hist = st.session_state.historial_evolucion
     if len(hist) < 2: return "Necesito al menos 2 registros (Previo y Actual) para estimar."
-    try: hist_sorted = sorted(hist, key=lambda x: datetime.datetime.strptime(x['Fecha'], "%d/%m") if len(x['Fecha']) <= 5 else datetime.datetime.now())
-    except: hist_sorted = hist
-    areas = [h['Area'] for h in hist_sorted]
-    reduccion = areas[0] - areas[-1]
-    if reduccion <= 0: return "⚠️ Sin mejoría detectada. Revisar plan."
-    prom = reduccion / (len(areas) - 1)
-    if prom <= 0: return "⚠️ Estancamiento."
-    dias = int((areas[-1] / prom) * 1.5)
-    return f"📉 Tendencia Positiva: Cierre estimado en <b>{dias}-{dias+7} días</b>."
+    
+    try:
+        hist_sorted = sorted(hist, key=lambda x: datetime.datetime.strptime(x['Fecha'], "%d/%m").replace(year=datetime.datetime.now().year))
+    except:
+        hist_sorted = hist
+        
+    area_actual = hist_sorted[-1]['Area']
+    prof_actual = hist_sorted[-1].get('Profundidad', 0.0)
+    area_antigua = hist_sorted[0]['Area']
+    prof_antigua = hist_sorted[0].get('Profundidad', 0.0)
+    
+    cv = st.session_state.get('last_cv_data', {})
+    
+    # 1. SCORE PUSH
+    p_area = 0
+    if area_actual > 0:
+        if area_actual < 0.3: p_area = 1
+        elif area_actual <= 0.6: p_area = 2
+        elif area_actual <= 1.0: p_area = 3
+        elif area_actual <= 2.0: p_area = 4
+        elif area_actual <= 3.0: p_area = 5
+        elif area_actual <= 4.0: p_area = 6
+        elif area_actual <= 8.0: p_area = 7
+        elif area_actual <= 12.0: p_area = 8
+        elif area_actual <= 24.0: p_area = 9
+        else: p_area = 10
+        
+    p_nec = cv.get('p_nec', 0); p_esf = cv.get('p_esf', 0); p_gra = cv.get('p_gra', 0)
+    p_tejido = 1 
+    if p_nec > 10: p_tejido = 4
+    elif p_esf > 10: p_tejido = 3
+    elif p_gra > 10: p_tejido = 2
+    
+    p_exudado = 2 
+    if p_esf > 40: p_exudado = 3 
+    push_score = p_area + p_tejido + p_exudado
+
+    # --- REVISIÓN MURO BIOLÓGICO Y VASCULAR (ITB) ---
+    alb = st.session_state.get('lab_albumin')
+    hba1c = st.session_state.get('lab_hba1c')
+    itb = st.session_state.get('lab_itb')
+    
+    factor_paciente = st.session_state.get('patient_risk_factor', 1.0)
+    motivo_paciente = st.session_state.get('patient_risk_reason', 'Estándar')
+    
+    alerta_muro = ""
+    bloqueo_absoluto = False
+
+    if alb is not None and alb < 2.5:
+        bloqueo_absoluto = True
+        alerta_muro += f"<div style='color:#d32f2f; font-weight:bold; margin-top:5px;'>🛑 Muro Biológico: Albúmina ({alb} g/dL). Cierre fisiológicamente imposible sin soporte nutricional.</div>"
+    
+    if itb is not None:
+        if itb < 0.5:
+            bloqueo_absoluto = True
+            alerta_muro += f"<div style='color:#d32f2f; font-weight:bold; margin-top:5px;'>🛑 Isquemia Severa (ITB: {itb}). Contraindicada compresión. Cierre imposible sin revascularización urgente.</div>"
+        elif 0.8 <= itb <= 1.2:
+            factor_paciente *= 0.8 # Premia la curación
+            alerta_muro += f"<div style='color:#388e3c; font-weight:bold; margin-top:5px;'>🟢 ITB Óptimo ({itb}). Apto para compresión (acelera curación).</div>"
+            
+    if hba1c is not None and hba1c > 8.0:
+        factor_paciente *= 1.5 
+        alerta_muro += f"<div style='color:#e65100; font-weight:bold; margin-top:5px;'>⚠️ Alerta Metabólica: HbA1c ({hba1c}%). Microcirculación comprometida.</div>"
+
+    if bloqueo_absoluto:
+        return f"""
+        <div class="prediction-box" style="border-left: 5px solid #d32f2f;">
+            <div class="push-badge">Score PUSH: {push_score}/17</div>
+            <h4 style="margin-top:5px; color:#d32f2f;">🛑 Gemelo Digital: Pronóstico Fallido</h4>
+            {alerta_muro}
+            <hr style="margin: 8px 0px; border-top: 1px dashed #ccc;">
+            <span style='font-size: 0.85rem; color: #555;'>No se puede calcular fecha de alta hasta corregir los parámetros críticos.</span>
+        </div>
+        """
+
+    # --- LÓGICA DE FALSO ESTANCAMIENTO (Volumetría/Profundidad) ---
+    reduccion_area = area_antigua - area_actual
+    reduccion_prof = prof_antigua - prof_actual
+    
+    try:
+        d1 = datetime.datetime.strptime(hist_sorted[0]['Fecha'], "%d/%m").replace(year=datetime.datetime.now().year)
+        d2 = datetime.datetime.strptime(hist_sorted[-1]['Fecha'], "%d/%m").replace(year=datetime.datetime.now().year)
+        dias_pasados = max(1, (d2 - d1).days)
+    except:
+        dias_pasados = max(1, 7 * (len(hist_sorted)-1))
+
+    aceleracion_texto = "Geometría Constante"
+    
+    if reduccion_area <= 0: 
+        # Chequeo de Falso Estancamiento
+        if prof_antigua > 0 and reduccion_prof > 0:
+            aceleracion_texto = "🧊 Falso Estancamiento: Área estable, pero reducción de cavidad activa."
+            tasa_diaria = reduccion_prof / dias_pasados
+            dias_base = prof_actual / tasa_diaria
+            dias_estimados = dias_base * 1.5 # Rellenar cavidad lleva más tiempo
+        else:
+            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>⚠️ Sin mejoría detectada en Área ni Profundidad. Revisar plan."
+    else:
+        # Mejora normal por área
+        tasa_diaria = reduccion_area / dias_pasados
+        dias_base = area_actual / tasa_diaria
+        dias_estimados = dias_base * 1.3 
+        
+        # Check aceleración estándar
+        if len(hist_sorted) >= 3:
+            try:
+                d_mid = datetime.datetime.strptime(hist_sorted[-2]['Fecha'], "%d/%m").replace(year=datetime.datetime.now().year)
+                v_reciente = (hist_sorted[-2]['Area'] - area_actual) / max(1, (d2 - d_mid).days)
+                v_antigua = (hist_sorted[0]['Area'] - hist_sorted[-2]['Area']) / max(1, (d_mid - d1).days)
+                
+                if v_reciente < (v_antigua * 0.8):
+                    dias_estimados *= 1.4; aceleracion_texto = "Frenando (Cronificación)"
+                elif v_reciente > (v_antigua * 1.2):
+                    dias_estimados *= 0.8; aceleracion_texto = "Acelerando (Fase Proliferativa)"
+            except: pass
+
+    penalizacion = 0
+    alerta_biofilm = ""
+    if st.session_state.get('last_biofilm_detected', False):
+        penalizacion += 14
+        alerta_biofilm = "<div class='biofilm-alert'>🦠 +14 días por carga bacteriana/biofilm.</div>"
+        
+    if cv:
+        if "ALTO" in cv.get('isquemia', '') and itb is None:
+            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>🛑 <b>Isquemia Visual ALTA:</b> Imposible predecir sin revascularización. (Haz ITB para confirmar)."
+        penalizacion += (p_nec / 10.0) * 2 
+        penalizacion += (p_esf / 10.0) * 1  
+            
+    zona = st.session_state.punto_cuerpo
+    factor_anatomico = 1.0
+    if zona in ["Cara", "Cuello"]: factor_anatomico = 0.7
+    elif zona in ["Sacro/Glúteo"]: factor_anatomico = 1.3
+    elif zona in ["Talón"]: factor_anatomico = 1.8
+    elif zona in ["Pie"]: factor_anatomico = 1.4
+    
+    dias_base_ajustados = (dias_estimados + penalizacion)
+    dias_finales = int(max(1, dias_base_ajustados * factor_anatomico * factor_paciente))
+    
+    html = f"""
+    <div class="prediction-box">
+        <div class="push-badge">Score PUSH Estimado: {push_score}/17</div>
+        <h4 style="margin-top:5px; color:#1976d2;">📉 Gemelo Digital (Predicción V82)</h4>
+        Alta estimada en: <b>{dias_finales} a {dias_finales + 7} días</b>.
+        {alerta_muro}
+        {alerta_biofilm}
+        <hr style="margin: 8px 0px; border-top: 1px dashed #ccc;">
+        <ul style='font-size: 0.85rem; color: #555; margin-bottom: 0px; padding-left: 15px;'>
+          <li><b>Evolución 3D:</b> {aceleracion_texto}.</li>
+          <li><b>Perfusión ({zona}):</b> Multiplicador x{factor_anatomico}</li>
+          <li><b>Metabolismo/Labs:</b> {motivo_paciente} (x{factor_paciente:.2f})</li>
+        </ul>
+    </div>
+    """
+    return html
 
 def create_pdf(texto_analisis):
     class PDF(FPDF):
@@ -357,7 +509,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 77.0")
+st.title("🩺 LabMind 82.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -402,7 +554,7 @@ with col_center:
         usar_moneda = False
         
         if modo == "🧩 Integral (Analizar Todo)":
-            with st.expander("📂 Documentación", expanded=False):
+            with st.expander("📂 Documentación (PDFs, Analíticas)", expanded=False):
                 c1, c2 = st.columns(2)
                 meds_files = c1.file_uploader("💊 Fármacos", accept_multiple_files=True, key="int_meds")
                 labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
@@ -430,20 +582,23 @@ with col_center:
                         for p in prev: archivos.append(("prev_img", p))
                     except: pass
 
-                c_d, c_a, c_b = st.columns([0.4,0.4,0.2])
+                # V82.0 - AÑADIDO PROFUNDIDAD
+                c_d, c_a, c_p, c_b = st.columns([0.3, 0.3, 0.3, 0.1])
                 with c_d: d_m = st.date_input("Fecha", value=datetime.date.today()-datetime.timedelta(days=7))
                 with c_a: a_m = st.number_input("Área (cm²)", min_value=0.0, step=0.1)
+                with c_p: p_m = st.number_input("Prof. (cm)", min_value=0.0, step=0.1)
                 with c_b: 
                     st.write(""); st.write("")
-                    if st.button("➕", key="btn_add"): st.session_state.historial_evolucion.append({"Fecha": d_m.strftime("%d/%m"), "Area": a_m})
+                    if st.button("➕", key="btn_add"): st.session_state.historial_evolucion.append({"Fecha": d_m.strftime("%d/%m"), "Area": a_m, "Profundidad": p_m})
 
-            with st.expander("💊 Contexto (Opcional)", expanded=False):
-                meds_files = st.file_uploader("Docs", accept_multiple_files=True, key="w_meds")
+            with st.expander("🩸 Docs y Analíticas (Afecta a Predicción)", expanded=False):
+                st.caption("Sube PDFs de analíticas aquí para que la IA extraiga Albúmina, HbA1c o ITB.")
+                meds_files = st.file_uploader("Docs / Analíticas", accept_multiple_files=True, key="w_meds")
             
             st.write("📸 **Estado ACTUAL:**")
             
             if st.session_state.img_previo and "Heridas" in modo:
-                st.markdown('<div class="ghost-alert">👻 <b>GHOST MODE ACTIVO:</b> Al tomar la foto, la IA intentará alinearla automáticamente con la previa.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="ghost-alert">👻 <b>GHOST MODE ACTIVO:</b> Al tomar la foto, la IA intentará alinearla automáticamente.</div>', unsafe_allow_html=True)
             
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=st.session_state.pref_fuente, key="rad_src_wounds", on_change=update_cookie_fuente)
             
@@ -471,7 +626,7 @@ with col_center:
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
         
         audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
+        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, patologías previas...")
         nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         galeria_avanzada = []
@@ -479,13 +634,16 @@ with col_center:
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
+            st.session_state.img_actual = None; st.session_state.img_ghost = None ; st.session_state.img_marcada = None 
+            st.session_state.patient_risk_factor = 1.0; st.session_state.patient_risk_reason = "Estándar"
+            st.session_state.last_biofilm_detected = False
             
-            # Resetear variables visuales para no mostrar cosas viejas
-            st.session_state.img_actual = None
-            st.session_state.img_ghost = None 
-            st.session_state.img_marcada = None 
+            # Reset variables analíticas
+            st.session_state.lab_albumin = None
+            st.session_state.lab_hba1c = None
+            st.session_state.lab_itb = None
             
-            with st.spinner(f"🧠 Procesando Visión e IA ({modo})..."):
+            with st.spinner(f"🧠 Procesando Gemelo Digital y Analíticas ({modo})..."):
                 video_paths_local = [] 
                 primer_video_local = None 
                 
@@ -560,6 +718,11 @@ with col_center:
                                             st.toast("✨ Auto-Alineación completada")
                                     
                                     cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
+                                    st.session_state.last_cv_data = cv_data 
+                                    
+                                    img_bio, has_bio = detectar_biofilm(img_final_proc)
+                                    st.session_state.last_biofilm_detected = has_bio
+                                    
                                     if cv_data["area"] > 0: st.session_state.area_herida = cv_data["area"]
                                     st.session_state.img_actual = cv_data["img_calibrada"]
                                     
@@ -568,6 +731,7 @@ with col_center:
                                     - Piel: {cv_data['fitzpatrick']}
                                     - Bordes: {cv_data['bordes']}
                                     - Isquemia Perilesional: {cv_data['isquemia']}
+                                    - Biofilm Óptico: {'Detectado' if has_bio else 'No detectado'}
                                     """
                                     
                                     galeria_avanzada.append(("🗺️ Segmentación", cv_data["img_segmentada"]))
@@ -577,7 +741,7 @@ with col_center:
                                     con.append(cv_data["img_calibrada"]); con.append(cv_data["img_segmentada"])
                             else: 
                                 img_final, proc = anonymize_face(img_pil)
-                                st.session_state.img_actual = img_final # Guardar para mostrar a la derecha
+                                st.session_state.img_actual = img_final
                                 con.append(img_final)
 
                     # --- LÓGICA DINÁMICA DEL PROMPT ---
@@ -599,7 +763,7 @@ with col_center:
                         """
                     elif "RX" in modo or "ECG" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
-                        instruccion_modo = 'Enfoque: Interpretación Radiológica / Cardiológica. Analiza las imágenes o videos en detalle. En la caja "MANEJO", proporciona pautas clínicas (ej. reposo, cirugía, rehabilitación, derivaciones). **ESTRICTAMENTE PROHIBIDO hablar de apósitos, curas, epitelización o cuidado de heridas.**'
+                        instruccion_modo = 'Enfoque: Interpretación Radiológica / Cardiológica. Analiza las imágenes o videos en detalle. En la caja "MANEJO", proporciona pautas clínicas (ej. reposo, cirugía, rehabilitación, derivaciones). **ESTRICTAMENTE PROHIBIDO hablar de apósitos o cuidado de heridas.**'
                         html_extra = ""
                     elif "Farmacia" in modo:
                         titulo_caja = "💊 PAUTAS FARMACOLÓGICAS"
@@ -607,64 +771,101 @@ with col_center:
                         html_extra = ""
                     else:
                         titulo_caja = "💡 PLAN INTEGRAL DE ACCIÓN"
-                        instruccion_modo = 'Enfoque: Evaluación médica general. Sugiere manejo holístico y derivaciones. Evita hablar de curas de heridas si no aplica directamente.'
+                        instruccion_modo = 'Enfoque: Evaluación médica general. Sugiere manejo holístico y derivaciones.'
                         html_extra = ""
 
                     instruccion_bbox = ""
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         instruccion_bbox = """
-                        INSTRUCCIÓN DE DETECCIÓN ESPACIAL (OBLIGATORIA SI HAY PATOLOGÍA FOCAL):
-                        Si identificas una patología focal (ej: fractura, tumor, isquemia, elevación ST), DEBES devolver sus coordenadas.
-                        - Si analizas una IMAGEN: Añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
-                        - Si analizas un VIDEO (RMN/TAC): Añade además el SEGUNDO EXACTO (en formato decimal) donde mejor se ve. 
-                          Formato estricto: TIMESTAMP: [segundos] BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
-                          Ejemplo Video: TIMESTAMP: 4.5 BBOX: [200, 300, 400, 500] LABEL: Masa tumoral
-                        (Sustituye ymin, xmin, ymax, xmax por valores proporcionales de 0 a 1000).
+                        INSTRUCCIÓN BBOX: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
+                        Si es VIDEO añade también: TIMESTAMP: [segundos]. (Valores proporcionales 0 a 1000).
                         """
+
+                    instruccion_nlp_riesgo = """
+                        INSTRUCCIÓN NLP Y LABORATORIO (OBLIGATORIA): 
+                        1. Lee Notas Clínicas y Farmacia buscando comorbilidades. Añade al final fuera del HTML: RISK_MULTIPLIER: [valor decimal] LABEL: [motivo] (Usa 1.0 si sano).
+                        2. Busca ESTRICTAMENTE niveles de Albúmina (g/dL), Hemoglobina Glicosilada (%) y el Índice Tobillo-Brazo (ITB). Si los encuentras, añade al final:
+                        LAB_ALBUMIN: [valor, ej: 2.4]
+                        LAB_HBA1C: [valor, ej: 8.5]
+                        LAB_ITB: [valor, ej: 0.6]
+                    """
 
                     prompt = f"""
                     Rol: Especialista Clínico Experto. Contexto: {contexto}. Modo Seleccionado: {modo}.
                     Zona Anatómica: {st.session_state.punto_cuerpo}. Notas del paciente: "{notas}"
                     
-                    INPUTS ADICIONALES (SOLO LECTURA INTERNA, NO REPETIR EN SALIDA):
-                    - PROTOCOLO DE UNIDAD: {txt_proto}
-                    - FARMACIA: {txt_meds}
+                    INPUTS ADICIONALES (Documentación adjunta extraída en texto):
+                    - PROTOCOLO: {txt_proto}
+                    - DOCUMENTACIÓN (Farmacia/Analíticas): {txt_meds}
                     {datos_cv_texto}
                     
-                    INSTRUCCIONES DE COMPORTAMIENTO (MUY ESTRICTO):
-                    1. NO repitas listas de medicamentos ni copipesgues el protocolo al principio de tu respuesta. Ve al grano usando las cajas.
+                    INSTRUCCIONES DE COMPORTAMIENTO:
+                    1. Ve al grano usando las cajas.
                     2. {instruccion_modo}
-                    3. Si el "Protocolo de Unidad" o la "Farmacia" aportada trata de cuidado de heridas, pero tú estás analizando un ECG o una Resonancia (RMN/TAC), IGNORA EL PROTOCOLO POR COMPLETO para no confundirte.
                     {instruccion_bbox}
+                    {instruccion_nlp_riesgo}
                     
-                    FORMATO HTML REQUERIDO (Usa solo estas cajas):
-                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción clínica detallada de lo que observas en este modo]</div>
+                    FORMATO HTML REQUERIDO:
+                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción clínica detallada]</div>
                     <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Pasos urgentes a tomar]</div>
-                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones específicas para {modo}]</div>
+                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones específicas]</div>
                     {html_extra}
                     """
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # --- AUTO-EXTRAER Y DIBUJAR BBOX (IMAGEN O VIDEO) ---
+                    # --- EXTRAER FACTORES NLP ---
+                    patron_riesgo = r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<]+)'
+                    match_riesgo = re.search(patron_riesgo, texto_generado)
+                    if match_riesgo:
+                        try:
+                            st.session_state.patient_risk_factor = float(match_riesgo.group(1))
+                            st.session_state.patient_risk_reason = match_riesgo.group(2).strip()
+                            texto_generado = re.sub(patron_riesgo, '', texto_generado)
+                        except: pass
+                        
+                    # --- EXTRAER DATOS LABORATORIO (V82.0 - INCLUYE ITB) ---
+                    patron_alb = r'LAB_ALBUMIN:\s*([\d\.,]+)'
+                    match_alb = re.search(patron_alb, texto_generado)
+                    if match_alb:
+                        try: st.session_state.lab_albumin = float(match_alb.group(1).replace(',','.'))
+                        except: pass
+                        texto_generado = re.sub(patron_alb, '', texto_generado)
+
+                    patron_hba1c = r'LAB_HBA1C:\s*([\d\.,]+)'
+                    match_hba1c = re.search(patron_hba1c, texto_generado)
+                    if match_hba1c:
+                        try: st.session_state.lab_hba1c = float(match_hba1c.group(1).replace(',','.'))
+                        except: pass
+                        texto_generado = re.sub(patron_hba1c, '', texto_generado)
+                        
+                    patron_itb = r'LAB_ITB:\s*([\d\.,]+)'
+                    match_itb = re.search(patron_itb, texto_generado)
+                    if match_itb:
+                        try: st.session_state.lab_itb = float(match_itb.group(1).replace(',','.'))
+                        except: pass
+                        texto_generado = re.sub(patron_itb, '', texto_generado)
+                    
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_principal_para_marcar, primer_video_local)
                         if detectado:
-                            st.session_state.img_marcada = img_marcada # Guardar para mostrar en grande en la app
+                            st.session_state.img_marcada = img_marcada 
 
-                    st.session_state.resultado_analisis = texto_generado
+                    st.session_state.resultado_analisis = texto_generado.strip()
                     
                     new_entry = { "id": str(uuid.uuid4()), "date": datetime.datetime.now().strftime("%d/%m %H:%M"), "mode": modo, "note": nota_historial if nota_historial else "Sin etiqueta", "result": texto_generado }
                     st.session_state.history_db.append(new_entry)
                     
                     if "Heridas" in modo and st.session_state.area_herida > 0:
-                        st.session_state.historial_evolucion.append({"Fecha": datetime.datetime.now().strftime("%d/%m"), "Area": st.session_state.area_herida})
+                        # V82 - Ahora guarda la profundidad si se ha introducido
+                        p_manual = 0.0
+                        if 'p_m' in locals(): p_manual = p_m
+                        st.session_state.historial_evolucion.append({"Fecha": datetime.datetime.now().strftime("%d/%m"), "Area": st.session_state.area_herida, "Profundidad": p_manual})
                     
                     if st.session_state.resultado_analisis:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
-                    # Las imágenes adicionales (profundidad, térmicas) se quedan pequeñas aquí
                     if mostrar_imagenes and galeria_avanzada:
                         st.markdown("##### 🔬 Mapas Adicionales")
                         cols = st.columns(len(galeria_avanzada))
@@ -711,10 +912,10 @@ with col_center:
 # --- COLUMNA 3 (VISOR CLÍNICO UNIVERSAL) ---
 with col_right:
     if "Heridas" in modo or "Dermatología" in modo:
-        with st.expander("🔮 Evolución Visual", expanded=True):
+        with st.expander("🔮 Visor y Predicción 3D", expanded=True):
             if len(st.session_state.historial_evolucion) > 0:
-                pred_text = predecir_cierre()
-                st.markdown(f'<div class="prediction-text">{pred_text}</div>', unsafe_allow_html=True)
+                pred_text = predecir_cierre_inteligente()
+                st.markdown(pred_text, unsafe_allow_html=True)
             
             if st.session_state.img_marcada:
                 st.markdown("#### 🎯 Hallazgo Detectado")
