@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 71.0 (Multi-Video RMN)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 72.0 (Smart Routing)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -306,7 +306,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 71.0")
+st.title("🩺 LabMind 72.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -338,7 +338,6 @@ with col_center:
     with tab_analisis:
         st.subheader("1. Selección de Modo")
         
-        # --- AÑADIDO /Resonancia AL NOMBRE DEL MODO ---
         modo = st.selectbox("Especialidad:", 
                      ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC/Resonancia", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
@@ -348,7 +347,6 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         
-        # LÓGICA MODOS
         if modo == "🧩 Integral (Analizar Todo)":
             with st.expander("📂 Documentación", expanded=False):
                 c1, c2 = st.columns(2)
@@ -362,7 +360,6 @@ with col_center:
             if fuente_label == "📸 WebCam":
                 if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
             else:
-                # INTEGRAL SOPORTA MÚLTIPLES VIDEOS Y FOTOS
                 if fs := st.file_uploader("Subir Imágenes o Videos", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
                     for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
 
@@ -408,8 +405,6 @@ with col_center:
         elif modo == "📈 ECG": 
             if fs:=st.file_uploader("ECG", type=['jpg','pdf'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
-                
-        # --- NUEVO SOPORTE MULTI-VIDEO PARA RESONANCIA/TAC/RX ---
         elif modo == "💀 RX/TAC/Resonancia": 
             st.info("💀 **Modo Imagenología**: Sube múltiples imágenes (RX) o videos (TAC/Resonancia)")
             if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
@@ -438,7 +433,6 @@ with col_center:
                     con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""
                     datos_cv_texto = ""
 
-                    # PROTOCOLO
                     final_proto_obj = None; is_local = False
                     if proto_uploaded: final_proto_obj = proto_uploaded
                     elif using_fixed_proto and fixed_proto_path: final_proto_obj = fixed_proto_path; is_local = True
@@ -458,9 +452,8 @@ with col_center:
                         else:
                             img_proto = Image.open(file_handle)
                             con.append(img_proto)
-                            txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA - IDENTIFICA MARCAS COMERCIALES]"
+                            txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]"
                     
-                    # Docs
                     for fs in [meds_files, labs_files, reports_files]:
                         if fs: 
                             for f in fs:
@@ -471,10 +464,8 @@ with col_center:
                     
                     img_display = None; img_thermal = None; img_prev_display = None
                     
-                    # PROCESAMIENTO DE ARCHIVOS (IMÁGENES Y VIDEOS)
                     for label, a in archivos:
                         if "video" in label:
-                            # --- RESTAURADA LÓGICA DE SUBIDA DE VIDEO (SOPORTA MÚLTIPLES) ---
                             st.toast(f"⏳ Subiendo y procesando video: {a.name}...")
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
                                 tf.write(a.read())
@@ -487,7 +478,6 @@ with col_center:
                             os.remove(tp)
                             st.toast(f"✅ Video listo para análisis")
                         else: 
-                            # Procesamiento de Imágenes Normal
                             img_pil = Image.open(a)
                             if ("Heridas" in modo or "Dermatología" in modo):
                                 if "prev" in label:
@@ -507,15 +497,15 @@ with col_center:
                                     st.session_state.img_actual = cv_data["img_calibrada"]
                                     
                                     datos_cv_texto = f"""
-                                    [DATOS DE VISIÓN COMPUTACIONAL]:
-                                    - Piel Fitzpatrick detectada: {cv_data['fitzpatrick']}
-                                    - Estado de los bordes: {cv_data['bordes']}
-                                    - Riesgo de Isquemia Perilesional: {cv_data['isquemia']}
+                                    [DATOS VISIÓN COMPUTACIONAL]:
+                                    - Piel: {cv_data['fitzpatrick']}
+                                    - Bordes: {cv_data['bordes']}
+                                    - Isquemia Perilesional: {cv_data['isquemia']}
                                     """
                                     
-                                    galeria_avanzada.append(("🗺️ Segmentación (Tejidos)", cv_data["img_segmentada"]))
-                                    if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad Relativa 3D", cv_data["img_depth"]))
-                                    galeria_avanzada.append(("🌡️ Termografía Simulada", procesar_termografia(img_final_proc)))
+                                    galeria_avanzada.append(("🗺️ Segmentación", cv_data["img_segmentada"]))
+                                    if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad 3D", cv_data["img_depth"]))
+                                    galeria_avanzada.append(("🌡️ Termografía", procesar_termografia(img_final_proc)))
 
                                     con.append(cv_data["img_calibrada"])
                                     con.append(cv_data["img_segmentada"])
@@ -523,35 +513,11 @@ with col_center:
                                 img_final, proc = anonymize_face(img_pil)
                                 con.append(img_final)
 
-                    # --- LÓGICA DINÁMICA DE LA CAJA VERDE SEGÚN EL MODO ---
-                    if "Heridas" in modo:
-                        titulo_caja_verde = "🛠️ CURA (Materiales del Protocolo)"
-                        instruccion_caja = 'En la caja "CURA", **EXTRAE Y RECOMIENDA** únicamente los productos con su **MARCA COMERCIAL** que aparezcan en el protocolo/farmacia adjuntos. Usa los DATOS DE VISIÓN COMPUTACIONAL para justificar tu decisión.'
-                    else:
-                        titulo_caja_verde = "💡 RECOMENDACIONES"
-                        instruccion_caja = 'En la caja "RECOMENDACIONES", detalla las pautas clínicas, análisis de las imágenes/videos (RMN/TAC) o siguientes pasos.'
-
-                    prompt = f"""
-                    Rol: APN / Especialista. Contexto: {contexto}. Modo: {modo}.
-                    Zona Anatómica: {st.session_state.punto_cuerpo}. Notas: "{notas}"
-                    
-                    INPUTS DISPONIBLES (NO REPETIR FUERA DE CAJAS):
-                    - PROTOCOLO: {txt_proto}
-                    - FARMACIA: {txt_meds}
-                    {datos_cv_texto}
-                    
-                    INSTRUCCIONES DE SALIDA (ESTRICTO):
-                    1. **PROHIBIDO** repetir el listado de fármacos o el protocolo en bruto.
-                    2. {instruccion_caja}
-                    
-                    FORMATO HTML REQUERIDO:
-                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Detalle clínico de las imágenes o videos]</div>
-                    <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Acciones a tomar]</div>
-                    <div class="material-box"><b>{titulo_caja_verde}:</b><br>[Contenido específico]</div>
-                    """
-                    
-                    if "Heridas" in modo:
-                        prompt += """
+                    # --- LÓGICA DINÁMICA DEL PROMPT SEGÚN EL MODO (ENRUTAMIENTO AISLADO) ---
+                    if "Heridas" in modo or "Dermatología" in modo:
+                        titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
+                        instruccion_modo = 'Enfoque: Cuidado de heridas y piel. En la caja "CURA", **EXTRAE Y RECOMIENDA** productos con **MARCA COMERCIAL** basándote EXCLUSIVAMENTE en el protocolo adjunto y la idoneidad clínica.'
+                        html_extra = """
                         2. BARRA TEJIDOS (Etiquetas fuera):
                         <div class="tissue-labels">
                             <div style="width:G%" class="tissue-label-text">Granulación G%</div>
@@ -564,8 +530,39 @@ with col_center:
                            <div class="tissue-nec" style="width:N%"></div>
                         </div>
                         """
+                    elif "RX" in modo or "ECG" in modo:
+                        titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
+                        instruccion_modo = 'Enfoque: Interpretación Radiológica / Cardiológica. Analiza las imágenes o videos en detalle. En la caja "MANEJO", proporciona pautas clínicas (ej. reposo, cirugía, rehabilitación, derivaciones). **ESTRICTAMENTE PROHIBIDO hablar de apósitos, curas, epitelización o cuidado de heridas.**'
+                        html_extra = ""
+                    elif "Farmacia" in modo:
+                        titulo_caja = "💊 PAUTAS FARMACOLÓGICAS"
+                        instruccion_modo = 'Enfoque: Farmacología. Analiza medicamentos, interacciones y dosis. En la caja "PAUTAS", detalla consejos de administración y precauciones.'
+                        html_extra = ""
+                    else:
+                        titulo_caja = "💡 PLAN INTEGRAL DE ACCIÓN"
+                        instruccion_modo = 'Enfoque: Evaluación médica general. Sugiere manejo holístico y derivaciones. Evita hablar de curas de heridas si no aplica directamente.'
+                        html_extra = ""
 
-                    if "Farmacia" in modo: prompt += " CHECK DOSIS."
+                    prompt = f"""
+                    Rol: Especialista Clínico Experto. Contexto: {contexto}. Modo Seleccionado: {modo}.
+                    Zona Anatómica: {st.session_state.punto_cuerpo}. Notas del paciente: "{notas}"
+                    
+                    INPUTS ADICIONALES (SOLO LECTURA INTERNA, NO REPETIR EN SALIDA):
+                    - PROTOCOLO DE UNIDAD: {txt_proto}
+                    - FARMACIA: {txt_meds}
+                    {datos_cv_texto}
+                    
+                    INSTRUCCIONES DE COMPORTAMIENTO (MUY ESTRICTO):
+                    1. NO repitas listas de medicamentos ni copipesgues el protocolo al principio de tu respuesta. Ve al grano usando las cajas.
+                    2. {instruccion_modo}
+                    3. Si el "Protocolo de Unidad" o la "Farmacia" aportada trata de cuidado de heridas, pero tú estás analizando un ECG o una Resonancia (RMN/TAC), IGNORA EL PROTOCOLO POR COMPLETO para no confundirte.
+                    
+                    FORMATO HTML REQUERIDO (Usa solo estas cajas):
+                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción clínica detallada de lo que observas en este modo]</div>
+                    <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Pasos urgentes a tomar]</div>
+                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones específicas para {modo}]</div>
+                    {html_extra}
+                    """
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     st.session_state.resultado_analisis = resp.text
