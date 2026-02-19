@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 75.0 (AI Pathology Markers)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 77.0 (Main Clinical Viewer)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -60,9 +60,11 @@ if "punto_cuerpo" not in st.session_state: st.session_state.punto_cuerpo = "No e
 if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 if "history_db" not in st.session_state: st.session_state.history_db = []
 
+# Variables visuales globales
 if "img_previo" not in st.session_state: st.session_state.img_previo = None 
 if "img_actual" not in st.session_state: st.session_state.img_actual = None 
 if "img_ghost" not in st.session_state: st.session_state.img_ghost = None   
+if "img_marcada" not in st.session_state: st.session_state.img_marcada = None # NUEVA PARA VISOR
 
 if "prefs_loaded" not in st.session_state:
     try:
@@ -111,25 +113,45 @@ if not st.session_state.autenticado:
 #      FUNCIONES VISIÓN & CLÍNICAS
 # ==========================================
 
-def extraer_y_dibujar_bbox_cv(img_pil, texto):
+def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
     """
-    Busca coordenadas BBOX generadas por la IA en el texto, dibuja un rectángulo
-    en la imagen original y limpia el texto para el usuario.
-    Formato esperado: BBOX: [ymin, xmin, ymax, xmax] LABEL: Texto
+    Busca coordenadas BBOX y TIMESTAMPS generadas por IA.
+    Si hay un video y un TIMESTAMP, extrae ese fotograma exacto y dibuja.
+    Si no, usa la imagen principal (img_pil).
     """
-    patron = r'BBOX:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*LABEL:\s*([^\n<]+)'
+    patron = r'(?:TIMESTAMP:\s*([\d\.]+)\s*)?BBOX:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*LABEL:\s*([^\n<]+)'
     matches = re.findall(patron, texto)
     
     if not matches:
-        return img_pil, texto, False
+        return None, texto, False
         
-    img_cv = cv2.cvtColor(np.array(img_pil.convert('RGB')), cv2.COLOR_RGB2BGR)
+    base_img = img_pil
+    
+    primer_ts = matches[0][0]
+    if primer_ts and video_path:
+        try:
+            ts_segundos = float(primer_ts)
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps > 0:
+                frame_objetivo = int(ts_segundos * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_objetivo)
+                ret, frame = cap.read()
+                if ret:
+                    base_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            cap.release()
+        except Exception as e:
+            print("Error extrayendo frame del video:", e)
+            
+    if base_img is None:
+        return None, re.sub(patron, '', texto).strip(), False
+
+    img_cv = cv2.cvtColor(np.array(base_img.convert('RGB')), cv2.COLOR_RGB2BGR)
     h, w = img_cv.shape[:2]
     
     for match in matches:
-        ymin, xmin, ymax, xmax, label = match
+        ts_str, ymin, xmin, ymax, xmax, label = match
         try:
-            # IA devuelve coordenadas normalizadas (0 a 1000)
             x1 = max(0, min(w, int(int(xmin) * w / 1000)))
             y1 = max(0, min(h, int(int(ymin) * h / 1000)))
             x2 = max(0, min(w, int(int(xmax) * w / 1000)))
@@ -146,10 +168,10 @@ def extraer_y_dibujar_bbox_cv(img_pil, texto):
             cv2.rectangle(img_cv, (x1, max(0, y1-th-15)), (x1+tw+10, y1), (0, 0, 255), -1)
             cv2.putText(img_cv, texto_label, (x1+5, max(0, y1-7)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
         except Exception as e:
-            print("Error BBOX:", e)
+            pass
             
     img_res = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
-    texto_limpio = re.sub(patron, '', texto) # Borramos los datos en bruto para que no se vean
+    texto_limpio = re.sub(patron, '', texto)
     return img_res, texto_limpio.strip(), True
 
 def procesar_termografia(pil_image):
@@ -185,7 +207,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     
     img_calibrada = img_bgr.copy()
     pixels_per_cm = 0
-    moneda_detectada = False
     
     circles = cv2.HoughCircles(cv2.GaussianBlur(gray, (9, 9), 2), cv2.HOUGH_GRADIENT, 1.2, 50, param1=100, param2=30, minRadius=20, maxRadius=300)
     
@@ -195,7 +216,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             cv2.circle(img_calibrada, (x, y), r, (0, 255, 0), 4)
             cv2.putText(img_calibrada, "1 EUR (Calibrado)", (x - 40, y - r - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             pixels_per_cm = (r * 2) / 2.325
-            moneda_detectada = True
             
             mask_moneda = np.zeros_like(gray)
             cv2.circle(mask_moneda, (x, y), int(r*0.6), 255, -1)
@@ -224,32 +244,27 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
                 
     area_final = area_pixels_total * ((1 / pixels_per_cm) ** 2) if pixels_per_cm > 0 else 0
 
-    fitzpatrick = "No evaluable"
-    estado_bordes = "No evaluable"
-    riesgo_isquemia = "No evaluable"
+    fitzpatrick = "No evaluable"; estado_bordes = "No evaluable"; riesgo_isquemia = "No evaluable"
     img_segmentada = img_calibrada.copy()
     img_depth = None
 
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
-        
         mask_piel = cv2.bitwise_not(mask_herida)
         mean_piel = cv2.mean(img_calibrada, mask=mask_piel)[:3]
         luma = 0.299*mean_piel[2] + 0.587*mean_piel[1] + 0.114*mean_piel[0]
         
-        if luma > 170: fitzpatrick = "Tipo I-II (Piel Clara)"
-        elif luma > 100: fitzpatrick = "Tipo III-IV (Piel Intermedia)"
-        else: fitzpatrick = "Tipo V-VI (Piel Oscura)"
+        if luma > 170: fitzpatrick = "Tipo I-II (Clara)"
+        elif luma > 100: fitzpatrick = "Tipo III-IV (Intermedia)"
+        else: fitzpatrick = "Tipo V-VI (Oscura)"
         
-        if "Oscura" not in fitzpatrick and mean_piel[2] < (mean_piel[0] + 15):
-            riesgo_isquemia = "ALTO (Posible palidez/cianosis perilesional)"
-        else:
-            riesgo_isquemia = "Bajo (Perfusión capilar aparente normal)"
+        if "Oscura" not in fitzpatrick and mean_piel[2] < (mean_piel[0] + 15): riesgo_isquemia = "ALTO"
+        else: riesgo_isquemia = "Bajo"
 
         perimeter = cv2.arcLength(best_contour, True)
         circularity = 4 * np.pi * (cv2.contourArea(best_contour) / (perimeter * perimeter)) if perimeter > 0 else 0
-        if circularity < 0.35: estado_bordes = "Bordes irregulares/socavados (Riesgo de tunelización)"
-        else: estado_bordes = "Bordes regulares (Favorable para epitelización)"
+        if circularity < 0.35: estado_bordes = "Irregulares/Socavados"
+        else: estado_bordes = "Regulares"
 
         mask_roi = np.zeros(img_calibrada.shape[:2], dtype=np.uint8)
         cv2.drawContours(mask_roi, [best_contour], -1, 255, -1)
@@ -260,9 +275,7 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         m_gra = cv2.inRange(roi_hsv, (0, 50, 61), (10, 255, 255)) + cv2.inRange(roi_hsv, (170, 50, 61), (180, 255, 255))
         
         overlay = img_segmentada.copy()
-        overlay[m_nec > 0] = [0, 0, 0]       
-        overlay[m_esf > 0] = [0, 255, 255]   
-        overlay[m_gra > 0] = [0, 0, 255]     
+        overlay[m_nec > 0] = [0, 0, 0]; overlay[m_esf > 0] = [0, 255, 255]; overlay[m_gra > 0] = [0, 0, 255]     
         img_segmentada = cv2.addWeighted(img_calibrada, 0.6, overlay, 0.4, 0)
         cv2.putText(img_segmentada, "MAPA TEJIDOS", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
@@ -272,10 +285,7 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         img_depth = Image.fromarray(cv2.cvtColor(depth_map, cv2.COLOR_BGR2RGB))
 
     return {
-        "area": area_final,
-        "fitzpatrick": fitzpatrick,
-        "bordes": estado_bordes,
-        "isquemia": riesgo_isquemia,
+        "area": area_final, "fitzpatrick": fitzpatrick, "bordes": estado_bordes, "isquemia": riesgo_isquemia,
         "img_calibrada": Image.fromarray(cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2RGB)),
         "img_segmentada": Image.fromarray(cv2.cvtColor(img_segmentada, cv2.COLOR_BGR2RGB)),
         "img_depth": img_depth
@@ -347,7 +357,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 75.0")
+st.title("🩺 LabMind 77.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -398,7 +408,7 @@ with col_center:
                 labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
             st.write("📸 **Visual / Videos:**")
             
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología (IA Visual)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=st.session_state.pref_fuente, key="rad_src_integral", on_change=update_cookie_fuente)
             
             if fuente_label == "📸 WebCam":
@@ -409,7 +419,7 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para calibrar y medir", value=st.session_state.pref_moneda, key="chk_moneda_global", on_change=update_cookie_moneda)
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología (IA Visual)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             
             with st.expander("⏮️ Ver Evolución", expanded=False):
                 prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key="w_prev")
@@ -446,12 +456,12 @@ with col_center:
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
         elif modo == "📈 ECG": 
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología (IA Visual)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("ECG", type=['jpg','pdf', 'png'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
         elif modo == "💀 RX/TAC/Resonancia": 
             st.info("💀 **Modo Imagenología**: Sube imágenes (RX) o videos (TAC/RMN)")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología (IA Visual)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Auto-Extraer Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
                 
@@ -469,9 +479,16 @@ with col_center:
         if st.button("🚀 ANALIZAR", type="primary"):
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
-            st.session_state.img_actual = None; st.session_state.img_ghost = None 
+            
+            # Resetear variables visuales para no mostrar cosas viejas
+            st.session_state.img_actual = None
+            st.session_state.img_ghost = None 
+            st.session_state.img_marcada = None 
             
             with st.spinner(f"🧠 Procesando Visión e IA ({modo})..."):
+                video_paths_local = [] 
+                primer_video_local = None 
+                
                 try:
                     genai.configure(api_key=st.session_state.api_key)
                     model = genai.GenerativeModel("models/gemini-3-flash-preview")
@@ -508,26 +525,27 @@ with col_center:
 
                     if audio_val: con.append(genai.upload_file(audio_val, mime_type="audio/wav"))
                     
-                    img_display = None; img_thermal = None; img_prev_display = None
                     imagen_principal_para_marcar = None
                     
                     for label, a in archivos:
                         if "video" in label:
-                            st.toast(f"⏳ Subiendo y procesando video: {a.name}...")
+                            st.toast(f"⏳ Subiendo video {a.name} a Gemini...")
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
                                 tf.write(a.read())
                                 tp = tf.name
+                                video_paths_local.append(tp)
+                                if not primer_video_local: primer_video_local = tp
+                                
                             vf = genai.upload_file(path=tp)
                             while vf.state.name == "PROCESSING":
                                 time.sleep(2)
                                 vf = genai.get_file(vf.name)
                             con.append(vf)
-                            os.remove(tp)
-                            st.toast(f"✅ Video listo para análisis")
+                            st.toast(f"✅ Video subido y procesado")
                         else: 
                             img_pil = Image.open(a)
                             if not imagen_principal_para_marcar:
-                                imagen_principal_para_marcar = img_pil # Guardamos la original para los bounding boxes
+                                imagen_principal_para_marcar = img_pil
                                 
                             if ("Heridas" in modo or "Dermatología" in modo):
                                 if "prev" in label:
@@ -542,7 +560,6 @@ with col_center:
                                             st.toast("✨ Auto-Alineación completada")
                                     
                                     cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
-                                    
                                     if cv_data["area"] > 0: st.session_state.area_herida = cv_data["area"]
                                     st.session_state.img_actual = cv_data["img_calibrada"]
                                     
@@ -557,13 +574,13 @@ with col_center:
                                     if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad 3D", cv_data["img_depth"]))
                                     galeria_avanzada.append(("🌡️ Termografía", procesar_termografia(img_final_proc)))
 
-                                    con.append(cv_data["img_calibrada"])
-                                    con.append(cv_data["img_segmentada"])
+                                    con.append(cv_data["img_calibrada"]); con.append(cv_data["img_segmentada"])
                             else: 
                                 img_final, proc = anonymize_face(img_pil)
+                                st.session_state.img_actual = img_final # Guardar para mostrar a la derecha
                                 con.append(img_final)
 
-                    # --- LÓGICA DINÁMICA DEL PROMPT SEGÚN EL MODO (ENRUTAMIENTO AISLADO) ---
+                    # --- LÓGICA DINÁMICA DEL PROMPT ---
                     if "Heridas" in modo or "Dermatología" in modo:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
                         instruccion_modo = 'Enfoque: Cuidado de heridas y piel. En la caja "CURA", **EXTRAE Y RECOMIENDA** productos con **MARCA COMERCIAL** basándote EXCLUSIVAMENTE en el protocolo adjunto y la idoneidad clínica.'
@@ -593,15 +610,16 @@ with col_center:
                         instruccion_modo = 'Enfoque: Evaluación médica general. Sugiere manejo holístico y derivaciones. Evita hablar de curas de heridas si no aplica directamente.'
                         html_extra = ""
 
-                    # --- PROMPT PARA DETECCIÓN ESPACIAL (BBOX) ---
                     instruccion_bbox = ""
-                    if mostrar_imagenes and imagen_principal_para_marcar:
+                    if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         instruccion_bbox = """
                         INSTRUCCIÓN DE DETECCIÓN ESPACIAL (OBLIGATORIA SI HAY PATOLOGÍA FOCAL):
-                        Si identificas una patología, anomalía o lesión focalizada en la imagen (ej: fractura, elevación ST, tumor, úlcera principal), DEBES devolver sus coordenadas para que el sistema la marque con un rectángulo rojo.
-                        Añade exactamente esta línea al FINAL ABSOLUTO de tu respuesta (FUERA del formato HTML) por cada hallazgo:
-                        BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre de patología o zona
-                        Sustituye ymin, xmin, ymax, xmax por los valores numéricos de 0 a 1000 que representan las proporciones relativas en la imagen (donde 0,0 es arriba/izq y 1000,1000 es abajo/der).
+                        Si identificas una patología focal (ej: fractura, tumor, isquemia, elevación ST), DEBES devolver sus coordenadas.
+                        - Si analizas una IMAGEN: Añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
+                        - Si analizas un VIDEO (RMN/TAC): Añade además el SEGUNDO EXACTO (en formato decimal) donde mejor se ve. 
+                          Formato estricto: TIMESTAMP: [segundos] BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
+                          Ejemplo Video: TIMESTAMP: 4.5 BBOX: [200, 300, 400, 500] LABEL: Masa tumoral
+                        (Sustituye ymin, xmin, ymax, xmax por valores proporcionales de 0 a 1000).
                         """
 
                     prompt = f"""
@@ -629,11 +647,11 @@ with col_center:
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # --- EXTRAER Y DIBUJAR BBOX ---
-                    if mostrar_imagenes and imagen_principal_para_marcar:
-                        img_marcada, texto_generado, detectado = extraer_y_dibujar_bbox_cv(imagen_principal_para_marcar, texto_generado)
+                    # --- AUTO-EXTRAER Y DIBUJAR BBOX (IMAGEN O VIDEO) ---
+                    if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
+                        img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_principal_para_marcar, primer_video_local)
                         if detectado:
-                            galeria_avanzada.insert(0, ("🎯 Patología Detectada (IA Bounding Box)", img_marcada))
+                            st.session_state.img_marcada = img_marcada # Guardar para mostrar en grande en la app
 
                     st.session_state.resultado_analisis = texto_generado
                     
@@ -646,14 +664,20 @@ with col_center:
                     if st.session_state.resultado_analisis:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
+                    # Las imágenes adicionales (profundidad, térmicas) se quedan pequeñas aquí
                     if mostrar_imagenes and galeria_avanzada:
-                        st.markdown("##### 🔬 Mapas Clínicos y Hallazgos")
+                        st.markdown("##### 🔬 Mapas Adicionales")
                         cols = st.columns(len(galeria_avanzada))
                         for i, (titulo, img) in enumerate(galeria_avanzada):
                             with cols[i]:
                                 st.image(img, caption=titulo, use_container_width=True)
 
                 except Exception as e: st.error(f"Error: {e}")
+                
+                finally:
+                    for vp in video_paths_local:
+                        try: os.remove(vp)
+                        except: pass
 
         if st.session_state.resultado_analisis:
             st.markdown(st.session_state.resultado_analisis.replace("```html","").replace("```",""), unsafe_allow_html=True)
@@ -663,7 +687,6 @@ with col_center:
                 for m in st.session_state.chat_messages:
                     with st.chat_message(m["role"]): st.markdown(m["content"])
                 
-                # --- CHAT LIMPIO ---
                 if p := st.chat_input("Escribe tu duda sobre este caso..."):
                     st.session_state.chat_messages.append({"role": "user", "content": p})
                     with st.chat_message("user"): st.markdown(p)
@@ -685,17 +708,21 @@ with col_center:
             for item in reversed(st.session_state.history_db):
                 with st.expander(f"📅 {item['date']} | {item['note']}"): st.markdown(item['result'], unsafe_allow_html=True)
 
-# --- COLUMNA 3 (VISUAL) ---
+# --- COLUMNA 3 (VISOR CLÍNICO UNIVERSAL) ---
 with col_right:
-    with st.expander("🔮 Evolución & Ghost", expanded=True):
-        if len(st.session_state.historial_evolucion) > 0:
-            pred_text = predecir_cierre()
-            st.markdown(f'<div class="prediction-text">{pred_text}</div>', unsafe_allow_html=True)
+    if "Heridas" in modo or "Dermatología" in modo:
+        with st.expander("🔮 Evolución Visual", expanded=True):
+            if len(st.session_state.historial_evolucion) > 0:
+                pred_text = predecir_cierre()
+                st.markdown(f'<div class="prediction-text">{pred_text}</div>', unsafe_allow_html=True)
             
+            if st.session_state.img_marcada:
+                st.markdown("#### 🎯 Hallazgo Detectado")
+                st.image(st.session_state.img_marcada, caption="Patología Extraída/Marcada", use_container_width=True)
+                
             if st.session_state.img_ghost:
                 st.markdown("#### 👻 Ghost Mode (Alineación)")
                 st.image(st.session_state.img_ghost, caption="Mezcla: Previo (60%) + Actual (40%)", use_container_width=True)
-                st.caption("Si la imagen se ve borrosa es que no coinciden bien. Si se ve nítida, la alineación fue perfecta.")
             
             if st.session_state.img_previo and st.session_state.img_actual:
                 st.markdown("---")
@@ -704,8 +731,19 @@ with col_right:
                 with c_curr: st.image(st.session_state.img_actual, caption="Actual (Calibrada)", use_container_width=True)
             elif st.session_state.img_actual:
                 st.image(st.session_state.img_actual, caption="Estado Actual (Color Calibrado)", use_container_width=True)
-        else:
-            st.caption("Analiza una herida para ver la predicción.")
+            else:
+                if len(st.session_state.historial_evolucion) == 0:
+                    st.caption("Analiza una herida para ver la evolución visual.")
+    else:
+        with st.expander("🔬 Visor Clínico (Hallazgos)", expanded=True):
+            if st.session_state.get("img_marcada"):
+                st.markdown("#### 🎯 Patología Detectada por IA")
+                st.image(st.session_state.img_marcada, caption="Fotograma o Imagen Marcada", use_container_width=True)
+            elif st.session_state.get("img_actual"):
+                st.markdown("#### 📸 Imagen Analizada")
+                st.image(st.session_state.img_actual, use_container_width=True)
+            else:
+                st.info("Sube un estudio (Imagen o Vídeo) y marca la opción 'Mostrar Mapas Avanzados' para que la IA extraiga el fotograma y marque la patología aquí.")
 
 st.divider()
 if st.button("🔒"):
