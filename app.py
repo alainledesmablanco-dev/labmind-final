@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 85.0 (Smart UI)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 88.0 (Radiomics & Vector ECG)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -24,22 +24,16 @@ st.markdown("""
     div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; }
     div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
     
-    /* Configuración Global de Botones */
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
-    
-    /* Botón Primario (Analizar) - Azul */
     button[data-testid="baseButton-primary"] { background-color: #0066cc !important; color: white !important; border: none !important; }
-    
-    /* Hook CSS exclusivo para el botón de Nuevo Caso (Verde) */
     div.element-container:has(.btn-nuevo-hook) + div.element-container button {
-        background-color: #2e7d32 !important; 
-        color: white !important; 
-        border: none !important;
+        background-color: #2e7d32 !important; color: white !important; border: none !important;
     }
     
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
+    .radiomics-box { background-color: #f3e5f5; border-left: 6px solid #9c27b0; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #4a148c; font-family: sans-serif; }
     
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -81,8 +75,8 @@ if "img_ghost" not in st.session_state: st.session_state.img_ghost = None
 if "img_marcada" not in st.session_state: st.session_state.img_marcada = None 
 if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
 if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
+if "ecg_vector_data" not in st.session_state: st.session_state.ecg_vector_data = None
 
-# Variables Clínicas NLP + Labs
 if "patient_risk_factor" not in st.session_state: st.session_state.patient_risk_factor = 1.0
 if "patient_risk_reason" not in st.session_state: st.session_state.patient_risk_reason = "Estándar"
 if "lab_albumin" not in st.session_state: st.session_state.lab_albumin = None
@@ -133,9 +127,96 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      FUNCIONES VISIÓN & CLÍNICAS
+#      FUNCIONES VISIÓN & CLÍNICAS (V88)
 # ==========================================
 
+def generar_vistas_radiologicas(pil_image):
+    try:
+        img_cv = cv2.cvtColor(np.array(pil_image.convert('RGB')), cv2.COLOR_RGB2BGR)
+        lab = cv2.cvtColor(img_cv, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        cl = clahe.apply(l)
+        limg = cv2.merge((cl,a,b))
+        img_clahe = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+        img_neg = cv2.bitwise_not(img_cv)
+        return (Image.fromarray(cv2.cvtColor(img_clahe, cv2.COLOR_BGR2RGB)),
+                Image.fromarray(cv2.cvtColor(img_neg, cv2.COLOR_BGR2RGB)))
+    except: return None, None
+
+def aislar_trazado_ecg(pil_image):
+    try:
+        img_cv = cv2.cvtColor(np.array(pil_image.convert('RGB')), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 15)
+        smooth = cv2.GaussianBlur(thresh, (3, 3), 0)
+        return Image.fromarray(cv2.cvtColor(smooth, cv2.COLOR_GRAY2RGB))
+    except: return pil_image
+
+# V88.0: VECTORIZACIÓN 1D MATEMÁTICA
+def vectorizar_ecg_1d(img_aislada_pil):
+    """Convierte la imagen del ECG aislado en un DataFrame de Pandas (Serie Temporal)"""
+    try:
+        img_cv = cv2.cvtColor(np.array(img_aislada_pil), cv2.COLOR_RGB2GRAY)
+        _, thresh = cv2.threshold(img_cv, 127, 255, cv2.THRESH_BINARY_INV) # Tinta es blanco
+        
+        vector = []
+        h, w = thresh.shape
+        for x in range(w):
+            col = thresh[:, x]
+            y_indices = np.where(col > 0)[0]
+            if len(y_indices) > 0:
+                vector.append(h - np.mean(y_indices)) # Invertir para que los picos vayan arriba
+            else:
+                vector.append(np.nan)
+                
+        df = pd.DataFrame({'Amplitud (mV rel)': vector})
+        df = df.interpolate().fillna(method='bfill').fillna(method='ffill')
+        return df
+    except: return None
+
+# V88.0: SLICING DE 12 DERIVACIONES
+def hacer_slicing_ecg(pil_image):
+    """Corta el ECG en una cuadrícula 3 filas x 4 columnas (Estándar 12 leads)"""
+    try:
+        img_cv = cv2.cvtColor(np.array(pil_image.convert('RGB')), cv2.COLOR_RGB2BGR)
+        h, w = img_cv.shape[:2]
+        # Asumimos que el 80% superior contiene la rejilla 3x4 y el 20% inferior el DII largo
+        grid_h = int((h * 0.8) / 3)
+        grid_w = int(w / 4)
+        
+        slices = []
+        nombres = [['I', 'aVR', 'V1', 'V4'], 
+                   ['II', 'aVL', 'V2', 'V5'], 
+                   ['III', 'aVF', 'V3', 'V6']]
+                   
+        for row in range(3):
+            for col in range(4):
+                y1 = row * grid_h
+                y2 = (row + 1) * grid_h
+                x1 = col * grid_w
+                x2 = (col + 1) * grid_w
+                trozo = img_cv[y1:y2, x1:x2]
+                
+                # Añadir etiqueta
+                cv2.rectangle(trozo, (0,0), (60, 30), (255,255,255), -1)
+                cv2.putText(trozo, nombres[row][col], (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+                slices.append(Image.fromarray(cv2.cvtColor(trozo, cv2.COLOR_BGR2RGB)))
+        
+        # Combinar en una sola imagen de galería resumen
+        h_concat = []
+        for r in range(3):
+            fila = np.concatenate([np.array(slices[r*4 + c]) for c in range(4)], axis=1)
+            h_concat.append(fila)
+        final_grid = np.concatenate(h_concat, axis=0)
+        
+        # Redimensionar si es muy grande
+        scale = 1000 / final_grid.shape[1]
+        final_grid = cv2.resize(final_grid, (0,0), fx=scale, fy=scale)
+        return Image.fromarray(final_grid)
+    except: return None
+
+# V88.0: MAPAS DE CALOR (GRAD-CAM PSEUDO-SALIENCY)
 def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
     patron = r'(?:TIMESTAMP:\s*([\d\.]+)\s*)?BBOX:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*LABEL:\s*([^\n<]+)'
     matches = re.findall(patron, texto)
@@ -162,6 +243,9 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
     img_cv = cv2.cvtColor(np.array(base_img.convert('RGB')), cv2.COLOR_RGB2BGR)
     h, w = img_cv.shape[:2]
     
+    # Crear máscara para el Mapa de Calor
+    heatmap_mask = np.zeros((h, w), dtype=np.float32)
+    
     for match in matches:
         ts_str, ymin, xmin, ymax, xmax, label = match
         try:
@@ -170,21 +254,34 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
             x2 = max(0, min(w, int(int(xmax) * w / 1000)))
             y2 = max(0, min(h, int(int(ymax) * h / 1000)))
             
-            grosor_linea = max(2, int(w/250))
-            cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), grosor_linea)
+            # Dibujar núcleo térmico en la máscara
+            cx, cy = (x1+x2)//2, (y1+y2)//2
+            radio = max((x2-x1)//2, (y2-y1)//2)
+            cv2.circle(heatmap_mask, (cx, cy), radio, 255, -1)
             
+            # Textos
             texto_label = label.strip().upper()
             escala_fuente = max(0.5, w/1200)
             grosor_fuente = max(1, int(w/600))
             (tw, th), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, grosor_fuente)
-            
-            cv2.rectangle(img_cv, (x1, max(0, y1-th-15)), (x1+tw+10, y1), (0, 0, 255), -1)
-            cv2.putText(img_cv, texto_label, (x1+5, max(0, y1-7)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
+            cv2.putText(img_cv, texto_label, (x1, max(0, y1-10)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
         except: pass
-            
-    img_res = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+
+    # Aplicar desenfoque masivo para efecto nube de calor
+    heatmap_mask = cv2.GaussianBlur(heatmap_mask, (151, 151), 0)
+    heatmap_mask = np.uint8(255 * (heatmap_mask / np.max(heatmap_mask))) if np.max(heatmap_mask) > 0 else np.uint8(heatmap_mask)
+    
+    # Colorear y fusionar (Rojo/Jet sobre original)
+    colored_heatmap = cv2.applyColorMap(heatmap_mask, cv2.COLORMAP_JET)
+    
+    # Crear un alpha dinámico (solo oscurecer donde no hay calor)
+    alpha_mask = heatmap_mask.astype(float) / 255.0
+    alpha_mask = np.expand_dims(alpha_mask, axis=2)
+    
+    img_res = (img_cv * (1 - alpha_mask*0.5) + colored_heatmap * (alpha_mask*0.5)).astype(np.uint8)
+
     texto_limpio = re.sub(patron, '', texto)
-    return img_res, texto_limpio.strip(), True
+    return Image.fromarray(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
 
 def procesar_termografia(pil_image):
     try:
@@ -348,7 +445,6 @@ def alinear_imagenes(img_ref_pil, img_mov_pil):
         return Image.fromarray(aligned_cv), Image.fromarray(blend_cv)
     except: return img_mov_pil, None
 
-# --- MOTOR ORÁCULO CLÍNICO GEMELO DIGITAL ---
 def predecir_cierre_inteligente():
     hist = st.session_state.historial_evolucion
     if len(hist) < 2: return "Necesito al menos 2 registros (Previo y Actual) para estimar."
@@ -510,7 +606,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 85.0")
+st.title("🩺 LabMind 88.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -561,7 +657,7 @@ with col_center:
                 labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
             st.write("📸 **Visual / Videos:**")
             
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas y Heatmaps", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=st.session_state.pref_fuente, key="rad_src_integral", on_change=update_cookie_fuente)
             
             if fuente_label == "📸 WebCam":
@@ -572,7 +668,7 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para calibrar y medir", value=st.session_state.pref_moneda, key="chk_moneda_global", on_change=update_cookie_moneda)
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Segmentación y Heatmaps", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             
             with st.expander("⏮️ Ver Evolución", expanded=False):
                 prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key="w_prev")
@@ -611,12 +707,12 @@ with col_center:
                     for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
 
         elif modo == "📈 ECG": 
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Marcar Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Vectores 1D y Slicing 12-Leads", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("ECG", type=['jpg','pdf', 'png'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
         elif modo == "💀 RX/TAC/Resonancia": 
-            st.info("💀 **Modo Imagenología**: Sube imágenes (RX) o videos (TAC/RMN)")
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados y Auto-Extraer Patología", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            st.info("💀 **Radiómica Cuantitativa**: Si es RX y tiene barra de escala/DICOM, la IA calculará proporciones.")
+            mostrar_imagenes = st.checkbox("👁️ Activar Multiespectral y Mapas de Calor Clínicos", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
                 
@@ -631,7 +727,6 @@ with col_center:
 
         galeria_avanzada = []
 
-        # --- BOTONERA (ANALIZAR Y NUEVO CASO ASIMÉTRICOS) ---
         col_btn1, col_btn2 = st.columns([3, 1])
         with col_btn1:
             btn_analizar = st.button("🚀 ANALIZAR", type="primary", use_container_width=True)
@@ -640,7 +735,6 @@ with col_center:
             btn_nuevo = st.button("🔄 NUEVO", type="secondary", use_container_width=True)
 
         if btn_nuevo:
-            # Limpiar RAM
             st.session_state.resultado_analisis = None
             st.session_state.pdf_bytes = None
             st.session_state.historial_evolucion = []
@@ -657,8 +751,7 @@ with col_center:
             st.session_state.lab_albumin = None
             st.session_state.lab_hba1c = None
             st.session_state.lab_itb = None
-            
-            # Borrar subidas
+            st.session_state.ecg_vector_data = None
             for key in list(st.session_state.keys()):
                 if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "audio_recorder"]:
                     del st.session_state[key]
@@ -670,12 +763,13 @@ with col_center:
             st.session_state.img_actual = None; st.session_state.img_ghost = None ; st.session_state.img_marcada = None 
             st.session_state.patient_risk_factor = 1.0; st.session_state.patient_risk_reason = "Estándar"
             st.session_state.last_biofilm_detected = False
+            st.session_state.ecg_vector_data = None
             
             st.session_state.lab_albumin = None
             st.session_state.lab_hba1c = None
             st.session_state.lab_itb = None
             
-            with st.spinner(f"🧠 Procesando Caso Clínico ({modo})..."):
+            with st.spinner(f"🧠 Procesando Visión Radiómica / Vectores ({modo})..."):
                 video_paths_local = [] 
                 primer_video_local = None 
                 
@@ -734,51 +828,83 @@ with col_center:
                             st.toast(f"✅ Video subido y procesado")
                         else: 
                             img_pil = Image.open(a)
-                            if not imagen_principal_para_marcar:
-                                imagen_principal_para_marcar = img_pil
+                            
+                            # --- PRE-PROCESAMIENTO V88.0 (Slicing + Vectores) ---
+                            if modo == "💀 RX/TAC/Resonancia":
+                                img_clahe, img_neg = generar_vistas_radiologicas(img_pil)
+                                if img_clahe and img_neg:
+                                    con.extend([img_pil, img_clahe, img_neg])
+                                    if mostrar_imagenes: 
+                                        galeria_avanzada.append(("🩻 Alto Contraste (Filtro CLAHE)", img_clahe))
+                                        galeria_avanzada.append(("🌑 Inversión Ósea (Negativo)", img_neg))
+                                else: con.append(img_pil)
+                            
+                            elif modo == "📈 ECG":
+                                img_aislada = aislar_trazado_ecg(img_pil)
                                 
-                            if ("Heridas" in modo or "Dermatología" in modo):
-                                if "prev" in label:
-                                    con.append(img_pil)
-                                else:
-                                    img_final_proc = img_pil
-                                    if st.session_state.img_previo and "Heridas" in modo:
-                                        aligned, ghost_view = alinear_imagenes(st.session_state.img_previo, img_pil)
-                                        if ghost_view:
-                                            st.session_state.img_ghost = ghost_view 
-                                            img_final_proc = aligned 
+                                # Slicing Paralelo (Nivel 7)
+                                img_slicing = hacer_slicing_ecg(img_pil)
+                                if img_slicing: con.append(img_slicing)
+                                
+                                # Vectorización Matemática (Nivel 7)
+                                df_vector = vectorizar_ecg_1d(img_aislada)
+                                st.session_state.ecg_vector_data = df_vector
+                                
+                                con.extend([img_pil, img_aislada])
+                                
+                                if mostrar_imagenes: 
+                                    if img_slicing: galeria_avanzada.append(("🧩 Slicing 12-Leads", img_slicing))
+                                    galeria_avanzada.append(("📈 Señal Eléctrica Aislada", img_aislada))
+                                
+                            else:
+                                if not imagen_principal_para_marcar:
+                                    imagen_principal_para_marcar = img_pil
                                     
-                                    cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
-                                    st.session_state.last_cv_data = cv_data 
-                                    
-                                    img_bio, has_bio = detectar_biofilm(img_final_proc)
-                                    st.session_state.last_biofilm_detected = has_bio
-                                    
-                                    if cv_data["area"] > 0: st.session_state.area_herida = cv_data["area"]
-                                    st.session_state.img_actual = cv_data["img_calibrada"]
-                                    
-                                    datos_cv_texto = f"""
-                                    [DATOS VISIÓN COMPUTACIONAL]:
-                                    - Piel: {cv_data['fitzpatrick']}
-                                    - Bordes: {cv_data['bordes']}
-                                    - Isquemia Perilesional: {cv_data['isquemia']}
-                                    - Biofilm Óptico: {'Detectado' if has_bio else 'No detectado'}
-                                    """
-                                    
-                                    galeria_avanzada.append(("🗺️ Segmentación", cv_data["img_segmentada"]))
-                                    if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad 3D", cv_data["img_depth"]))
-                                    galeria_avanzada.append(("🌡️ Termografía", procesar_termografia(img_final_proc)))
+                                if ("Heridas" in modo or "Dermatología" in modo):
+                                    if "prev" in label:
+                                        con.append(img_pil)
+                                    else:
+                                        img_final_proc = img_pil
+                                        if st.session_state.img_previo and "Heridas" in modo:
+                                            aligned, ghost_view = alinear_imagenes(st.session_state.img_previo, img_pil)
+                                            if ghost_view:
+                                                st.session_state.img_ghost = ghost_view 
+                                                img_final_proc = aligned 
+                                        
+                                        cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
+                                        st.session_state.last_cv_data = cv_data 
+                                        
+                                        img_bio, has_bio = detectar_biofilm(img_final_proc)
+                                        st.session_state.last_biofilm_detected = has_bio
+                                        
+                                        if cv_data["area"] > 0: st.session_state.area_herida = cv_data["area"]
+                                        st.session_state.img_actual = cv_data["img_calibrada"]
+                                        
+                                        datos_cv_texto = f"""
+                                        [DATOS VISIÓN COMPUTACIONAL]:
+                                        - Piel: {cv_data['fitzpatrick']}
+                                        - Bordes: {cv_data['bordes']}
+                                        - Isquemia Perilesional: {cv_data['isquemia']}
+                                        - Biofilm Óptico: {'Detectado' if has_bio else 'No detectado'}
+                                        """
+                                        
+                                        galeria_avanzada.append(("🗺️ Segmentación", cv_data["img_segmentada"]))
+                                        if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad 3D", cv_data["img_depth"]))
+                                        galeria_avanzada.append(("🌡️ Termografía", procesar_termografia(img_final_proc)))
 
-                                    con.append(cv_data["img_calibrada"]); con.append(cv_data["img_segmentada"])
-                            else: 
-                                img_final, proc = anonymize_face(img_pil)
-                                st.session_state.img_actual = img_final
-                                con.append(img_final)
+                                        con.append(cv_data["img_calibrada"]); con.append(cv_data["img_segmentada"])
+                                else: 
+                                    img_final, proc = anonymize_face(img_pil)
+                                    st.session_state.img_actual = img_final
+                                    con.append(img_final)
 
-                    # --- LÓGICA DINÁMICA DEL PROMPT ---
+                            if modo in ["💀 RX/TAC/Resonancia", "📈 ECG"] and not imagen_principal_para_marcar:
+                                imagen_principal_para_marcar = img_pil
+
+                    # --- LÓGICA DINÁMICA DEL PROMPT Y RADIÓMICA (V88) ---
                     if "Heridas" in modo or "Dermatología" in modo:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
-                        instruccion_modo = 'Enfoque: Cuidado de heridas y piel. En la caja "CURA", **EXTRAE Y RECOMIENDA** productos con **MARCA COMERCIAL** basándote EXCLUSIVAMENTE en el protocolo adjunto y la idoneidad clínica.'
+                        instruccion_modo = 'Enfoque: Cuidado de heridas y piel. En la caja "CURA", **EXTRAE Y RECOMIENDA** productos basándote EXCLUSIVAMENTE en el protocolo adjunto.'
                         html_extra = """
                         2. BARRA TEJIDOS (Etiquetas fuera):
                         <div class="tissue-labels">
@@ -792,39 +918,42 @@ with col_center:
                            <div class="tissue-nec" style="width:N%"></div>
                         </div>
                         """
-                    elif "RX" in modo or "ECG" in modo:
+                    elif "RX" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
-                        instruccion_modo = 'Enfoque: Interpretación Radiológica / Cardiológica. Analiza las imágenes o videos en detalle. En la caja "MANEJO", proporciona pautas clínicas (ej. reposo, cirugía, rehabilitación, derivaciones). **ESTRICTAMENTE PROHIBIDO hablar de apósitos o cuidado de heridas.**'
+                        instruccion_modo = 'Enfoque: Radiómica Cuantitativa. 1. Busca escala DICOM impresa o usa proporciones. 2. Calcula automáticamente el Índice Cardiotorácico (ancho máximo corazón / ancho interno tórax). 3. LECTURA SISTEMÁTICA: Estructura tu lectura siguiendo el ABCDE.'
+                        html_extra = ""
+                    elif "ECG" in modo:
+                        titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
+                        instruccion_modo = 'Enfoque: Cardiología de Precisión. Te hemos enviado el trazado original, la señal aislada y un Slicing 3x4. LECTURA SISTEMÁTICA OBLIGATORIA: 1. Frecuencia. 2. Ritmo. 3. Eje eléctrico. 4. Intervalos matemáticos (PR, QRS, QT). 5. Segmento ST.'
                         html_extra = ""
                     elif "Farmacia" in modo:
                         titulo_caja = "💊 PAUTAS FARMACOLÓGICAS"
-                        instruccion_modo = 'Enfoque: Farmacología. Analiza medicamentos, interacciones y dosis. En la caja "PAUTAS", detalla consejos de administración y precauciones.'
+                        instruccion_modo = 'Enfoque: Farmacología. Analiza medicamentos, interacciones y dosis.'
                         html_extra = ""
                     else:
                         titulo_caja = "💡 PLAN INTEGRAL DE ACCIÓN"
-                        instruccion_modo = 'Enfoque: Evaluación médica general. Sugiere manejo holístico y derivaciones.'
+                        instruccion_modo = 'Enfoque: Evaluación médica general.'
                         html_extra = ""
 
                     instruccion_bbox = ""
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         instruccion_bbox = """
-                        3. INSTRUCCIÓN BBOX: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
+                        3. MAPA DE CALOR: Si identificas patología focal (nódulo, consolidación, infarto), añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre. (El sistema renderizará un Heatmap Grad-CAM en esa zona).
                         Si es VIDEO añade también: TIMESTAMP: [segundos].
                         """
                     
                     instruccion_enfermeria = ""
                     if contexto in ["Hospitalización", "Residencia", "Urgencias", "UCI"]:
-                        instruccion_enfermeria = "4. ROL DE ENFERMERÍA: Al estar el paciente en un entorno de vigilancia clínica, si detectas una patología aguda/grave (ej. infarto, tumor, fractura grave, neumonía), DEBES incluir obligatoriamente un apartado de '👩‍⚕️ Cuidados de Enfermería' dentro de la caja correspondiente, detallando vigilancia de constantes, posicionamiento del paciente, monitorización y signos de alarma específicos para su cuadro."
+                        instruccion_enfermeria = "4. ROL DE ENFERMERÍA: Al estar el paciente en un entorno vigilado, INCLUYE OBLIGATORIAMENTE un apartado de '👩‍⚕️ Cuidados de Enfermería' detallando vigilancia y postura."
 
                     instruccion_nlp_riesgo = """
-                        5. INSTRUCCIÓN NLP Y LABORATORIO (OBLIGATORIA): 
-                        - Añade al final fuera del HTML: RISK_MULTIPLIER: [valor decimal] LABEL: [motivo] (Usa 1.0 si sano).
-                        - Busca ESTRICTAMENTE niveles de Albúmina (g/dL), Hemoglobina Glicosilada (%) y el Índice Tobillo-Brazo (ITB). Si los encuentras, añade al final:
-                        LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor]
+                        5. INSTRUCCIÓN LABORATORIO: Busca niveles de Albúmina (g/dL), Hemoglobina Glicosilada (%) y el Índice Tobillo-Brazo (ITB). Añade al final:
+                        LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor] | RISK_MULTIPLIER: [decimal] LABEL: [motivo]
+                        Para Radiómica, si es RX Tórax, añade también al final: CTR_RATIO: [valor calculado, ej: 0.52]
                     """
 
                     prompt = f"""
-                    Rol: Especialista Clínico Experto. Contexto: {contexto}. Modo Seleccionado: {modo}.
+                    Rol: Especialista Clínico Experto (Motor Radiómico V88). Contexto: {contexto}. Modo: {modo}.
                     Zona Anatómica: {st.session_state.punto_cuerpo}. Notas del paciente: "{notas}"
                     
                     INPUTS ADICIONALES:
@@ -842,42 +971,37 @@ with col_center:
                     FORMATO HTML REQUERIDO:
                     <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción clínica detallada]</div>
                     <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Pasos urgentes a tomar]</div>
-                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones y/o cuidados de enfermería si aplica]</div>
+                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones/Cuidados enfermería]</div>
                     {html_extra}
                     """
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
+                    # Extracción variables
                     patron_riesgo = r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<]+)'
-                    match_riesgo = re.search(patron_riesgo, texto_generado)
-                    if match_riesgo:
-                        try:
-                            st.session_state.patient_risk_factor = float(match_riesgo.group(1))
-                            st.session_state.patient_risk_reason = match_riesgo.group(2).strip()
-                            texto_generado = re.sub(patron_riesgo, '', texto_generado)
+                    if match_riesgo := re.search(patron_riesgo, texto_generado):
+                        try: st.session_state.patient_risk_factor = float(match_riesgo.group(1)); st.session_state.patient_risk_reason = match_riesgo.group(2).strip(); texto_generado = re.sub(patron_riesgo, '', texto_generado)
                         except: pass
                         
-                    patron_alb = r'LAB_ALBUMIN:\s*([\d\.,]+)'
-                    match_alb = re.search(patron_alb, texto_generado)
-                    if match_alb:
-                        try: st.session_state.lab_albumin = float(match_alb.group(1).replace(',','.'))
+                    if match_alb := re.search(r'LAB_ALBUMIN:\s*([\d\.,]+)', texto_generado):
+                        try: st.session_state.lab_albumin = float(match_alb.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_ALBUMIN:\s*([\d\.,]+)', '', texto_generado)
                         except: pass
-                        texto_generado = re.sub(patron_alb, '', texto_generado)
 
-                    patron_hba1c = r'LAB_HBA1C:\s*([\d\.,]+)'
-                    match_hba1c = re.search(patron_hba1c, texto_generado)
-                    if match_hba1c:
-                        try: st.session_state.lab_hba1c = float(match_hba1c.group(1).replace(',','.'))
+                    if match_hba1c := re.search(r'LAB_HBA1C:\s*([\d\.,]+)', texto_generado):
+                        try: st.session_state.lab_hba1c = float(match_hba1c.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_HBA1C:\s*([\d\.,]+)', '', texto_generado)
                         except: pass
-                        texto_generado = re.sub(patron_hba1c, '', texto_generado)
                         
-                    patron_itb = r'LAB_ITB:\s*([\d\.,]+)'
-                    match_itb = re.search(patron_itb, texto_generado)
-                    if match_itb:
-                        try: st.session_state.lab_itb = float(match_itb.group(1).replace(',','.'))
+                    if match_itb := re.search(r'LAB_ITB:\s*([\d\.,]+)', texto_generado):
+                        try: st.session_state.lab_itb = float(match_itb.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_ITB:\s*([\d\.,]+)', '', texto_generado)
                         except: pass
-                        texto_generado = re.sub(patron_itb, '', texto_generado)
+                        
+                    # Extraer CTR para Radiómica
+                    if match_ctr := re.search(r'CTR_RATIO:\s*([\d\.,]+)', texto_generado):
+                        val_ctr = match_ctr.group(1)
+                        caja_radiomica = f'<div class="radiomics-box"><b>📐 Radiómica Cuantitativa:</b><br>Índice Cardiotorácico calculado: {val_ctr} (Límite normal < 0.50).</div>'
+                        texto_generado = texto_generado.replace('<div class="diagnosis-box">', caja_radiomica + '\n<div class="diagnosis-box">')
+                        texto_generado = re.sub(r'CTR_RATIO:\s*([\d\.,]+)', '', texto_generado)
                     
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_principal_para_marcar, primer_video_local)
@@ -898,7 +1022,7 @@ with col_center:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
                     if mostrar_imagenes and galeria_avanzada:
-                        st.markdown("##### 🔬 Mapas Adicionales")
+                        st.markdown("##### 🔬 Análisis de Capas Múltiples")
                         cols = st.columns(len(galeria_avanzada))
                         for i, (titulo, img) in enumerate(galeria_avanzada):
                             with cols[i]:
@@ -931,12 +1055,12 @@ with col_center:
                         except: st.error("Error chat")
 
         if st.session_state.pdf_bytes:
-            st.download_button("📥 PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
+            st.download_button("📥 Descargar Informe Clínico PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
 
     with tab_historial:
         if not st.session_state.history_db: st.info("Vacío.")
         else:
-            if st.button("🗑️ Todo"): st.session_state.history_db=[]; st.rerun()
+            if st.button("🗑️ Vaciar Historial"): st.session_state.history_db=[]; st.rerun()
             for item in reversed(st.session_state.history_db):
                 with st.expander(f"📅 {item['date']} | {item['note']}"): st.markdown(item['result'], unsafe_allow_html=True)
 
@@ -949,8 +1073,8 @@ with col_right:
                 st.markdown(pred_text, unsafe_allow_html=True)
             
             if st.session_state.img_marcada:
-                st.markdown("#### 🎯 Hallazgo Detectado")
-                st.image(st.session_state.img_marcada, caption="Patología Extraída/Marcada", use_container_width=True)
+                st.markdown("#### 🎯 Mapa de Calor (Saliency)")
+                st.image(st.session_state.img_marcada, caption="Concentración térmica IA", use_container_width=True)
                 
             if st.session_state.img_ghost:
                 st.markdown("#### 👻 Ghost Mode (Alineación)")
@@ -967,15 +1091,21 @@ with col_right:
                 if len(st.session_state.historial_evolucion) == 0:
                     st.caption("Analiza una herida para ver la evolución visual.")
     else:
-        with st.expander("🔬 Visor Clínico (Hallazgos)", expanded=True):
+        with st.expander("🔬 Visor Clínico Cuantitativo", expanded=True):
+            # Renderizado de vector ECG si existe
+            if st.session_state.get("ecg_vector_data") is not None:
+                st.markdown("#### 📊 Vectorización 1D (Onda de Voltaje)")
+                st.line_chart(st.session_state.ecg_vector_data, use_container_width=True)
+                st.caption("Gráfico interactivo extraído píxel a píxel del trazado original.")
+                
             if st.session_state.get("img_marcada"):
-                st.markdown("#### 🎯 Patología Detectada por IA")
-                st.image(st.session_state.img_marcada, caption="Fotograma o Imagen Marcada", use_container_width=True)
+                st.markdown("#### 🎯 Mapa de Calor (Grad-CAM)")
+                st.image(st.session_state.img_marcada, caption="Foco Patológico Detectado", use_container_width=True)
             elif st.session_state.get("img_actual"):
-                st.markdown("#### 📸 Imagen Analizada")
+                st.markdown("#### 📸 Imagen Original")
                 st.image(st.session_state.img_actual, use_container_width=True)
             else:
-                st.info("Sube un estudio (Imagen o Vídeo) y marca la opción 'Mostrar Mapas Avanzados' para que la IA extraiga el fotograma y marque la patología aquí.")
+                st.info("Sube un estudio (Imagen o Vídeo) y marca las opciones visuales para activar la Radiómica y los Mapas de Calor Clínicos.")
 
 st.divider()
 if st.button("🔒 Cerrar Sesión"):
