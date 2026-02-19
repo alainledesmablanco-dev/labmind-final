@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 84.0 (Fast Reset UI)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 85.0 (Smart UI)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -23,7 +23,19 @@ st.markdown("""
     .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
     div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; }
     div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #0066cc; color: white; margin-top: 10px; }
+    
+    /* Configuración Global de Botones */
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
+    
+    /* Botón Primario (Analizar) - Azul */
+    button[data-testid="baseButton-primary"] { background-color: #0066cc !important; color: white !important; border: none !important; }
+    
+    /* Hook CSS exclusivo para el botón de Nuevo Caso (Verde) */
+    div.element-container:has(.btn-nuevo-hook) + div.element-container button {
+        background-color: #2e7d32 !important; 
+        color: white !important; 
+        border: none !important;
+    }
     
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
@@ -114,7 +126,7 @@ if not st.session_state.autenticado:
     else:
         st.title("LabMind Acceso")
         k = st.text_input("API Key:", type="password")
-        if st.button("Entrar"):
+        if st.button("Entrar", type="primary"):
             expires = datetime.datetime.now() + datetime.timedelta(days=30)
             cookie_manager.set("labmind_secret_key", k, expires_at=expires)
             st.session_state.api_key = k; st.session_state.autenticado = True; st.rerun()
@@ -353,7 +365,6 @@ def predecir_cierre_inteligente():
     
     cv = st.session_state.get('last_cv_data', {})
     
-    # 1. SCORE PUSH
     p_area = 0
     if area_actual > 0:
         if area_actual < 0.3: p_area = 1
@@ -377,29 +388,23 @@ def predecir_cierre_inteligente():
     if p_esf > 40: p_exudado = 3 
     push_score = p_area + p_tejido + p_exudado
 
-    # --- REVISIÓN MURO BIOLÓGICO Y VASCULAR (ITB) ---
     alb = st.session_state.get('lab_albumin')
     hba1c = st.session_state.get('lab_hba1c')
     itb = st.session_state.get('lab_itb')
-    
     factor_paciente = st.session_state.get('patient_risk_factor', 1.0)
     motivo_paciente = st.session_state.get('patient_risk_reason', 'Estándar')
-    
-    alerta_muro = ""
-    bloqueo_absoluto = False
+    alerta_muro = ""; bloqueo_absoluto = False
 
     if alb is not None and alb < 2.5:
         bloqueo_absoluto = True
         alerta_muro += f"<div style='color:#d32f2f; font-weight:bold; margin-top:5px;'>🛑 Muro Biológico: Albúmina ({alb} g/dL). Cierre fisiológicamente imposible sin soporte nutricional.</div>"
-    
     if itb is not None:
         if itb < 0.5:
             bloqueo_absoluto = True
             alerta_muro += f"<div style='color:#d32f2f; font-weight:bold; margin-top:5px;'>🛑 Isquemia Severa (ITB: {itb}). Contraindicada compresión. Cierre imposible sin revascularización urgente.</div>"
         elif 0.8 <= itb <= 1.2:
             factor_paciente *= 0.8 
-            alerta_muro += f"<div style='color:#388e3c; font-weight:bold; margin-top:5px;'>🟢 ITB Óptimo ({itb}). Apto para compresión (acelera curación).</div>"
-            
+            alerta_muro += f"<div style='color:#388e3c; font-weight:bold; margin-top:5px;'>🟢 ITB Óptimo ({itb}). Apto para compresión.</div>"
     if hba1c is not None and hba1c > 8.0:
         factor_paciente *= 1.5 
         alerta_muro += f"<div style='color:#e65100; font-weight:bold; margin-top:5px;'>⚠️ Alerta Metabólica: HbA1c ({hba1c}%). Microcirculación comprometida.</div>"
@@ -429,12 +434,12 @@ def predecir_cierre_inteligente():
     
     if reduccion_area <= 0: 
         if prof_antigua > 0 and reduccion_prof > 0:
-            aceleracion_texto = "🧊 Falso Estancamiento: Área estable, pero reducción de cavidad activa."
+            aceleracion_texto = "🧊 Falso Estancamiento: Área estable, reducción de cavidad."
             tasa_diaria = reduccion_prof / dias_pasados
             dias_base = prof_actual / tasa_diaria
             dias_estimados = dias_base * 1.5 
         else:
-            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>⚠️ Sin mejoría detectada en Área ni Profundidad. Revisar plan."
+            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>⚠️ Sin mejoría detectada. Revisar plan."
     else:
         tasa_diaria = reduccion_area / dias_pasados
         dias_base = area_actual / tasa_diaria
@@ -449,7 +454,7 @@ def predecir_cierre_inteligente():
                 if v_reciente < (v_antigua * 0.8):
                     dias_estimados *= 1.4; aceleracion_texto = "Frenando (Cronificación)"
                 elif v_reciente > (v_antigua * 1.2):
-                    dias_estimados *= 0.8; aceleracion_texto = "Acelerando (Fase Proliferativa)"
+                    dias_estimados *= 0.8; aceleracion_texto = "Acelerando (Proliferativa)"
             except: pass
 
     penalizacion = 0
@@ -460,7 +465,7 @@ def predecir_cierre_inteligente():
         
     if cv:
         if "ALTO" in cv.get('isquemia', '') and itb is None:
-            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>🛑 <b>Isquemia Visual ALTA:</b> Imposible predecir sin revascularización. (Haz ITB para confirmar)."
+            return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>🛑 <b>Isquemia Visual ALTA:</b> Imposible predecir sin revascularización."
         penalizacion += (p_nec / 10.0) * 2 
         penalizacion += (p_esf / 10.0) * 1  
             
@@ -476,16 +481,16 @@ def predecir_cierre_inteligente():
     
     html = f"""
     <div class="prediction-box">
-        <div class="push-badge">Score PUSH Estimado: {push_score}/17</div>
-        <h4 style="margin-top:5px; color:#1976d2;">📉 Gemelo Digital (Predicción V82)</h4>
+        <div class="push-badge">Score PUSH: {push_score}/17</div>
+        <h4 style="margin-top:5px; color:#1976d2;">📉 Gemelo Digital Predictivo</h4>
         Alta estimada en: <b>{dias_finales} a {dias_finales + 7} días</b>.
         {alerta_muro}
         {alerta_biofilm}
         <hr style="margin: 8px 0px; border-top: 1px dashed #ccc;">
         <ul style='font-size: 0.85rem; color: #555; margin-bottom: 0px; padding-left: 15px;'>
           <li><b>Evolución 3D:</b> {aceleracion_texto}.</li>
-          <li><b>Perfusión ({zona}):</b> Multiplicador x{factor_anatomico}</li>
-          <li><b>Metabolismo/Labs:</b> {motivo_paciente} (x{factor_paciente:.2f})</li>
+          <li><b>Perfusión ({zona}):</b> x{factor_anatomico}</li>
+          <li><b>Metabolismo:</b> {motivo_paciente} (x{factor_paciente:.2f})</li>
         </ul>
     </div>
     """
@@ -505,7 +510,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 84.0")
+st.title("🩺 LabMind 85.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -626,15 +631,16 @@ with col_center:
 
         galeria_avanzada = []
 
-        # --- NUEVOS BOTONES (ANALIZAR y NUEVO CASO) ---
-        col_btn1, col_btn2 = st.columns(2)
+        # --- BOTONERA (ANALIZAR Y NUEVO CASO ASIMÉTRICOS) ---
+        col_btn1, col_btn2 = st.columns([3, 1])
         with col_btn1:
-            btn_analizar = st.button("🚀 ANALIZAR", type="primary")
+            btn_analizar = st.button("🚀 ANALIZAR", type="primary", use_container_width=True)
         with col_btn2:
-            btn_nuevo = st.button("🔄 NUEVO CASO")
+            st.markdown('<div class="btn-nuevo-hook" style="display:none;"></div>', unsafe_allow_html=True)
+            btn_nuevo = st.button("🔄 NUEVO", type="secondary", use_container_width=True)
 
         if btn_nuevo:
-            # Limpiar RAM visual y matemática de la sesión actual
+            # Limpiar RAM
             st.session_state.resultado_analisis = None
             st.session_state.pdf_bytes = None
             st.session_state.historial_evolucion = []
@@ -652,7 +658,7 @@ with col_center:
             st.session_state.lab_hba1c = None
             st.session_state.lab_itb = None
             
-            # Forzar el vaciado de los "file_uploader" y "audio_recorder" borrando sus llaves
+            # Borrar subidas
             for key in list(st.session_state.keys()):
                 if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "audio_recorder"]:
                     del st.session_state[key]
@@ -972,6 +978,6 @@ with col_right:
                 st.info("Sube un estudio (Imagen o Vídeo) y marca la opción 'Mostrar Mapas Avanzados' para que la IA extraiga el fotograma y marque la patología aquí.")
 
 st.divider()
-if st.button("🔒"):
+if st.button("🔒 Cerrar Sesión"):
     cookie_manager.delete("labmind_secret_key")
     st.session_state.autenticado = False; st.rerun()
