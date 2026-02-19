@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 83.0 (Nursing Care Integration)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 84.0 (Fast Reset UI)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -505,7 +505,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 83.0")
+st.title("🩺 LabMind 84.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -626,7 +626,39 @@ with col_center:
 
         galeria_avanzada = []
 
-        if st.button("🚀 ANALIZAR", type="primary"):
+        # --- NUEVOS BOTONES (ANALIZAR y NUEVO CASO) ---
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            btn_analizar = st.button("🚀 ANALIZAR", type="primary")
+        with col_btn2:
+            btn_nuevo = st.button("🔄 NUEVO CASO")
+
+        if btn_nuevo:
+            # Limpiar RAM visual y matemática de la sesión actual
+            st.session_state.resultado_analisis = None
+            st.session_state.pdf_bytes = None
+            st.session_state.historial_evolucion = []
+            st.session_state.area_herida = 0.0
+            st.session_state.chat_messages = []
+            st.session_state.img_previo = None 
+            st.session_state.img_actual = None 
+            st.session_state.img_ghost = None   
+            st.session_state.img_marcada = None 
+            st.session_state.last_cv_data = None 
+            st.session_state.last_biofilm_detected = False
+            st.session_state.patient_risk_factor = 1.0
+            st.session_state.patient_risk_reason = "Estándar"
+            st.session_state.lab_albumin = None
+            st.session_state.lab_hba1c = None
+            st.session_state.lab_itb = None
+            
+            # Forzar el vaciado de los "file_uploader" y "audio_recorder" borrando sus llaves
+            for key in list(st.session_state.keys()):
+                if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "audio_recorder"]:
+                    del st.session_state[key]
+            st.rerun()
+
+        if btn_analizar:
             st.session_state.log_privacidad = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = [] 
             st.session_state.img_actual = None; st.session_state.img_ghost = None ; st.session_state.img_marcada = None 
@@ -774,7 +806,6 @@ with col_center:
                         Si es VIDEO añade también: TIMESTAMP: [segundos].
                         """
                     
-                    # NUEVA INSTRUCCIÓN: CUIDADOS DE ENFERMERÍA (V83.0)
                     instruccion_enfermeria = ""
                     if contexto in ["Hospitalización", "Residencia", "Urgencias", "UCI"]:
                         instruccion_enfermeria = "4. ROL DE ENFERMERÍA: Al estar el paciente en un entorno de vigilancia clínica, si detectas una patología aguda/grave (ej. infarto, tumor, fractura grave, neumonía), DEBES incluir obligatoriamente un apartado de '👩‍⚕️ Cuidados de Enfermería' dentro de la caja correspondiente, detallando vigilancia de constantes, posicionamiento del paciente, monitorización y signos de alarma específicos para su cuadro."
