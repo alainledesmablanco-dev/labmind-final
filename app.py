@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 82.0 (Digital Twin)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 83.0 (Nursing Care Integration)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -70,7 +70,7 @@ if "img_marcada" not in st.session_state: st.session_state.img_marcada = None
 if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
 if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
 
-# Variables Clínicas NLP + Labs (V82.0)
+# Variables Clínicas NLP + Labs
 if "patient_risk_factor" not in st.session_state: st.session_state.patient_risk_factor = 1.0
 if "patient_risk_reason" not in st.session_state: st.session_state.patient_risk_reason = "Estándar"
 if "lab_albumin" not in st.session_state: st.session_state.lab_albumin = None
@@ -336,7 +336,7 @@ def alinear_imagenes(img_ref_pil, img_mov_pil):
         return Image.fromarray(aligned_cv), Image.fromarray(blend_cv)
     except: return img_mov_pil, None
 
-# --- MOTOR ORÁCULO CLÍNICO GEMELO DIGITAL (V82.0) ---
+# --- MOTOR ORÁCULO CLÍNICO GEMELO DIGITAL ---
 def predecir_cierre_inteligente():
     hist = st.session_state.historial_evolucion
     if len(hist) < 2: return "Necesito al menos 2 registros (Previo y Actual) para estimar."
@@ -397,7 +397,7 @@ def predecir_cierre_inteligente():
             bloqueo_absoluto = True
             alerta_muro += f"<div style='color:#d32f2f; font-weight:bold; margin-top:5px;'>🛑 Isquemia Severa (ITB: {itb}). Contraindicada compresión. Cierre imposible sin revascularización urgente.</div>"
         elif 0.8 <= itb <= 1.2:
-            factor_paciente *= 0.8 # Premia la curación
+            factor_paciente *= 0.8 
             alerta_muro += f"<div style='color:#388e3c; font-weight:bold; margin-top:5px;'>🟢 ITB Óptimo ({itb}). Apto para compresión (acelera curación).</div>"
             
     if hba1c is not None and hba1c > 8.0:
@@ -415,7 +415,6 @@ def predecir_cierre_inteligente():
         </div>
         """
 
-    # --- LÓGICA DE FALSO ESTANCAMIENTO (Volumetría/Profundidad) ---
     reduccion_area = area_antigua - area_actual
     reduccion_prof = prof_antigua - prof_actual
     
@@ -429,21 +428,18 @@ def predecir_cierre_inteligente():
     aceleracion_texto = "Geometría Constante"
     
     if reduccion_area <= 0: 
-        # Chequeo de Falso Estancamiento
         if prof_antigua > 0 and reduccion_prof > 0:
             aceleracion_texto = "🧊 Falso Estancamiento: Área estable, pero reducción de cavidad activa."
             tasa_diaria = reduccion_prof / dias_pasados
             dias_base = prof_actual / tasa_diaria
-            dias_estimados = dias_base * 1.5 # Rellenar cavidad lleva más tiempo
+            dias_estimados = dias_base * 1.5 
         else:
             return f"<div class='push-badge'>Score PUSH: {push_score}/17</div><br>⚠️ Sin mejoría detectada en Área ni Profundidad. Revisar plan."
     else:
-        # Mejora normal por área
         tasa_diaria = reduccion_area / dias_pasados
         dias_base = area_actual / tasa_diaria
         dias_estimados = dias_base * 1.3 
         
-        # Check aceleración estándar
         if len(hist_sorted) >= 3:
             try:
                 d_mid = datetime.datetime.strptime(hist_sorted[-2]['Fecha'], "%d/%m").replace(year=datetime.datetime.now().year)
@@ -509,7 +505,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 82.0")
+st.title("🩺 LabMind 83.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -582,7 +578,6 @@ with col_center:
                         for p in prev: archivos.append(("prev_img", p))
                     except: pass
 
-                # V82.0 - AÑADIDO PROFUNDIDAD
                 c_d, c_a, c_p, c_b = st.columns([0.3, 0.3, 0.3, 0.1])
                 with c_d: d_m = st.date_input("Fecha", value=datetime.date.today()-datetime.timedelta(days=7))
                 with c_a: a_m = st.number_input("Área (cm²)", min_value=0.0, step=0.1)
@@ -638,12 +633,11 @@ with col_center:
             st.session_state.patient_risk_factor = 1.0; st.session_state.patient_risk_reason = "Estándar"
             st.session_state.last_biofilm_detected = False
             
-            # Reset variables analíticas
             st.session_state.lab_albumin = None
             st.session_state.lab_hba1c = None
             st.session_state.lab_itb = None
             
-            with st.spinner(f"🧠 Procesando Gemelo Digital y Analíticas ({modo})..."):
+            with st.spinner(f"🧠 Procesando Caso Clínico ({modo})..."):
                 video_paths_local = [] 
                 primer_video_local = None 
                 
@@ -715,7 +709,6 @@ with col_center:
                                         if ghost_view:
                                             st.session_state.img_ghost = ghost_view 
                                             img_final_proc = aligned 
-                                            st.toast("✨ Auto-Alineación completada")
                                     
                                     cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
                                     st.session_state.last_cv_data = cv_data 
@@ -777,45 +770,48 @@ with col_center:
                     instruccion_bbox = ""
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         instruccion_bbox = """
-                        INSTRUCCIÓN BBOX: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
-                        Si es VIDEO añade también: TIMESTAMP: [segundos]. (Valores proporcionales 0 a 1000).
+                        3. INSTRUCCIÓN BBOX: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre
+                        Si es VIDEO añade también: TIMESTAMP: [segundos].
                         """
+                    
+                    # NUEVA INSTRUCCIÓN: CUIDADOS DE ENFERMERÍA (V83.0)
+                    instruccion_enfermeria = ""
+                    if contexto in ["Hospitalización", "Residencia", "Urgencias", "UCI"]:
+                        instruccion_enfermeria = "4. ROL DE ENFERMERÍA: Al estar el paciente en un entorno de vigilancia clínica, si detectas una patología aguda/grave (ej. infarto, tumor, fractura grave, neumonía), DEBES incluir obligatoriamente un apartado de '👩‍⚕️ Cuidados de Enfermería' dentro de la caja correspondiente, detallando vigilancia de constantes, posicionamiento del paciente, monitorización y signos de alarma específicos para su cuadro."
 
                     instruccion_nlp_riesgo = """
-                        INSTRUCCIÓN NLP Y LABORATORIO (OBLIGATORIA): 
-                        1. Lee Notas Clínicas y Farmacia buscando comorbilidades. Añade al final fuera del HTML: RISK_MULTIPLIER: [valor decimal] LABEL: [motivo] (Usa 1.0 si sano).
-                        2. Busca ESTRICTAMENTE niveles de Albúmina (g/dL), Hemoglobina Glicosilada (%) y el Índice Tobillo-Brazo (ITB). Si los encuentras, añade al final:
-                        LAB_ALBUMIN: [valor, ej: 2.4]
-                        LAB_HBA1C: [valor, ej: 8.5]
-                        LAB_ITB: [valor, ej: 0.6]
+                        5. INSTRUCCIÓN NLP Y LABORATORIO (OBLIGATORIA): 
+                        - Añade al final fuera del HTML: RISK_MULTIPLIER: [valor decimal] LABEL: [motivo] (Usa 1.0 si sano).
+                        - Busca ESTRICTAMENTE niveles de Albúmina (g/dL), Hemoglobina Glicosilada (%) y el Índice Tobillo-Brazo (ITB). Si los encuentras, añade al final:
+                        LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor]
                     """
 
                     prompt = f"""
                     Rol: Especialista Clínico Experto. Contexto: {contexto}. Modo Seleccionado: {modo}.
                     Zona Anatómica: {st.session_state.punto_cuerpo}. Notas del paciente: "{notas}"
                     
-                    INPUTS ADICIONALES (Documentación adjunta extraída en texto):
+                    INPUTS ADICIONALES:
                     - PROTOCOLO: {txt_proto}
-                    - DOCUMENTACIÓN (Farmacia/Analíticas): {txt_meds}
+                    - DOCUMENTACIÓN: {txt_meds}
                     {datos_cv_texto}
                     
                     INSTRUCCIONES DE COMPORTAMIENTO:
                     1. Ve al grano usando las cajas.
                     2. {instruccion_modo}
                     {instruccion_bbox}
+                    {instruccion_enfermeria}
                     {instruccion_nlp_riesgo}
                     
                     FORMATO HTML REQUERIDO:
                     <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción clínica detallada]</div>
                     <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Pasos urgentes a tomar]</div>
-                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones específicas]</div>
+                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones y/o cuidados de enfermería si aplica]</div>
                     {html_extra}
                     """
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # --- EXTRAER FACTORES NLP ---
                     patron_riesgo = r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<]+)'
                     match_riesgo = re.search(patron_riesgo, texto_generado)
                     if match_riesgo:
@@ -825,7 +821,6 @@ with col_center:
                             texto_generado = re.sub(patron_riesgo, '', texto_generado)
                         except: pass
                         
-                    # --- EXTRAER DATOS LABORATORIO (V82.0 - INCLUYE ITB) ---
                     patron_alb = r'LAB_ALBUMIN:\s*([\d\.,]+)'
                     match_alb = re.search(patron_alb, texto_generado)
                     if match_alb:
@@ -858,7 +853,6 @@ with col_center:
                     st.session_state.history_db.append(new_entry)
                     
                     if "Heridas" in modo and st.session_state.area_herida > 0:
-                        # V82 - Ahora guarda la profundidad si se ha introducido
                         p_manual = 0.0
                         if 'p_m' in locals(): p_manual = p_m
                         st.session_state.historial_evolucion.append({"Fecha": datetime.datetime.now().strftime("%d/%m"), "Area": st.session_state.area_herida, "Profundidad": p_manual})
