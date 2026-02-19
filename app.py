@@ -4,6 +4,7 @@ from PIL import Image
 import pypdf
 import time
 import os
+import tempfile
 from fpdf import FPDF
 import datetime
 import re
@@ -14,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 70.0 (Advanced CV Suite)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 71.0 (Multi-Video RMN)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -107,16 +108,40 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      NUEVA SUITE CV AVANZADA (LAS 6 MEJORAS)
+#      FUNCIONES VISIÓN & CLÍNICAS
 # ==========================================
 
+def procesar_termografia(pil_image):
+    try:
+        img = np.array(pil_image.convert('RGB'))
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+        _, a, _ = cv2.split(lab)
+        thermal_map = cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX)
+        thermal_colored = cv2.applyColorMap(thermal_map, cv2.COLORMAP_JET)
+        thermal_colored = cv2.GaussianBlur(thermal_colored, (15, 15), 0)
+        return Image.fromarray(cv2.cvtColor(thermal_colored, cv2.COLOR_BGR2RGB))
+    except: return pil_image
+
+def detectar_biofilm(pil_image):
+    try:
+        img = np.array(pil_image.convert('RGB'))
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        kernel = np.ones((5,5),np.uint8)
+        gradient = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+        _, mask = cv2.threshold(gradient, 10, 255, cv2.THRESH_BINARY_INV)
+        img_res = img.copy()
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img_res, contours, -1, (255, 214, 0), 2)
+        return Image.fromarray(img_res), len(contours) > 0
+    except: return pil_image, False
+
 def analisis_avanzado_heridas(pil_image, usar_moneda=False):
-    """Integra: Calibración, Segmentación, Profundidad, Bordes, Isquemia y Fitzpatrick."""
     img_np = np.array(pil_image.convert('RGB'))
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     
-    # 1. CALIBRACIÓN DE COLOR & DETECCIÓN MONEDA
     img_calibrada = img_bgr.copy()
     pixels_per_cm = 0
     moneda_detectada = False
@@ -131,7 +156,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             pixels_per_cm = (r * 2) / 2.325
             moneda_detectada = True
             
-            # Simple Color Calibration (Asumiendo que el centro de la moneda es gris neutro/claro)
             mask_moneda = np.zeros_like(gray)
             cv2.circle(mask_moneda, (x, y), int(r*0.6), 255, -1)
             mean_moneda = cv2.mean(img_bgr, mask=mask_moneda)[:3]
@@ -142,7 +166,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             
     if pixels_per_cm == 0: pixels_per_cm = 100.0 
 
-    # Detección Herida Principal (Mascara HSV)
     hsv = cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2HSV)
     mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
     mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
@@ -160,7 +183,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
                 
     area_final = area_pixels_total * ((1 / pixels_per_cm) ** 2) if pixels_per_cm > 0 else 0
 
-    # Variables clínicas por defecto
     fitzpatrick = "No evaluable"
     estado_bordes = "No evaluable"
     riesgo_isquemia = "No evaluable"
@@ -170,28 +192,24 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
         
-        # 6. FITZPATRICK Y 5. ISQUEMIA (Piel Perilesional)
         mask_piel = cv2.bitwise_not(mask_herida)
-        mean_piel = cv2.mean(img_calibrada, mask=mask_piel)[:3] # B, G, R
+        mean_piel = cv2.mean(img_calibrada, mask=mask_piel)[:3]
         luma = 0.299*mean_piel[2] + 0.587*mean_piel[1] + 0.114*mean_piel[0]
         
         if luma > 170: fitzpatrick = "Tipo I-II (Piel Clara)"
         elif luma > 100: fitzpatrick = "Tipo III-IV (Piel Intermedia)"
         else: fitzpatrick = "Tipo V-VI (Piel Oscura)"
         
-        # Isquemia rPPG heurística: baja reflectancia roja en piel circundante
         if "Oscura" not in fitzpatrick and mean_piel[2] < (mean_piel[0] + 15):
             riesgo_isquemia = "ALTO (Posible palidez/cianosis perilesional)"
         else:
             riesgo_isquemia = "Bajo (Perfusión capilar aparente normal)"
 
-        # 4. BORDES (Signo de epitelización)
         perimeter = cv2.arcLength(best_contour, True)
         circularity = 4 * np.pi * (cv2.contourArea(best_contour) / (perimeter * perimeter)) if perimeter > 0 else 0
         if circularity < 0.35: estado_bordes = "Bordes irregulares/socavados (Riesgo de tunelización)"
         else: estado_bordes = "Bordes regulares (Favorable para epitelización)"
 
-        # 2. MAPA DE SEGMENTACIÓN SEMÁNTICA
         mask_roi = np.zeros(img_calibrada.shape[:2], dtype=np.uint8)
         cv2.drawContours(mask_roi, [best_contour], -1, 255, -1)
         roi_hsv = cv2.bitwise_and(hsv, hsv, mask=mask_roi)
@@ -201,16 +219,15 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         m_gra = cv2.inRange(roi_hsv, (0, 50, 61), (10, 255, 255)) + cv2.inRange(roi_hsv, (170, 50, 61), (180, 255, 255))
         
         overlay = img_segmentada.copy()
-        overlay[m_nec > 0] = [0, 0, 0]       # Negro
-        overlay[m_esf > 0] = [0, 255, 255]   # Amarillo
-        overlay[m_gra > 0] = [0, 0, 255]     # Rojo
+        overlay[m_nec > 0] = [0, 0, 0]       
+        overlay[m_esf > 0] = [0, 255, 255]   
+        overlay[m_gra > 0] = [0, 0, 255]     
         img_segmentada = cv2.addWeighted(img_calibrada, 0.6, overlay, 0.4, 0)
         cv2.putText(img_segmentada, "MAPA TEJIDOS", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
-        # 3. MAPA DE PROFUNDIDAD (Volumetría 3D base sombras)
         x,y,w,h = cv2.boundingRect(best_contour)
         roi_gray = cv2.cvtColor(img_calibrada[y:y+h, x:x+w], cv2.COLOR_BGR2GRAY)
-        depth_map = cv2.applyColorMap(255 - roi_gray, cv2.COLORMAP_JET) # Oscuro = Frío/Profundo
+        depth_map = cv2.applyColorMap(255 - roi_gray, cv2.COLORMAP_JET) 
         img_depth = Image.fromarray(cv2.cvtColor(depth_map, cv2.COLOR_BGR2RGB))
 
     return {
@@ -222,17 +239,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
         "img_segmentada": Image.fromarray(cv2.cvtColor(img_segmentada, cv2.COLOR_BGR2RGB)),
         "img_depth": img_depth
     }
-
-def procesar_termografia(pil_image):
-    try:
-        img = np.array(pil_image.convert('RGB'))
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-        _, a, _ = cv2.split(lab)
-        thermal_map = cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX)
-        thermal_colored = cv2.applyColorMap(thermal_map, cv2.COLORMAP_JET)
-        return Image.fromarray(cv2.cvtColor(thermal_colored, cv2.COLOR_BGR2RGB))
-    except: return pil_image
 
 def anonymize_face(pil_image):
     try:
@@ -300,7 +306,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 70.0")
+st.title("🩺 LabMind 71.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 # --- COLUMNA 1 ---
@@ -332,8 +338,9 @@ with col_center:
     with tab_analisis:
         st.subheader("1. Selección de Modo")
         
+        # --- AÑADIDO /Resonancia AL NOMBRE DEL MODO ---
         modo = st.selectbox("Especialidad:", 
-                     ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC", "📂 Informes"])
+                     ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC/Resonancia", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
@@ -341,25 +348,27 @@ with col_center:
         archivos = []
         meds_files = None; labs_files = None; reports_files = None; ecg_files = None; rad_files = None 
         
+        # LÓGICA MODOS
         if modo == "🧩 Integral (Analizar Todo)":
             with st.expander("📂 Documentación", expanded=False):
                 c1, c2 = st.columns(2)
                 meds_files = c1.file_uploader("💊 Fármacos", accept_multiple_files=True, key="int_meds")
                 labs_files = c2.file_uploader("📊 Analíticas", accept_multiple_files=True, key="int_labs")
-            st.write("📸 **Visual:**")
+            st.write("📸 **Visual / Videos:**")
             
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados (Segmentación/3D)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             fuente_label = st.radio("Fuente:", ["📁 Archivo", "📸 WebCam"], horizontal=True, label_visibility="collapsed", index=st.session_state.pref_fuente, key="rad_src_integral", on_change=update_cookie_fuente)
             
             if fuente_label == "📸 WebCam":
                 if f := st.camera_input("Foto Paciente"): archivos.append(("cam", f))
             else:
-                if fs := st.file_uploader("Subir", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
-                    for f in fs: archivos.append(("video" if "video" in f.type else "img", f))
+                # INTEGRAL SOPORTA MÚLTIPLES VIDEOS Y FOTOS
+                if fs := st.file_uploader("Subir Imágenes o Videos", type=['jpg','png','mp4','mov'], accept_multiple_files=True, key="int_main"):
+                    for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
-            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para calibrar color y medir", value=st.session_state.pref_moneda, key="chk_moneda_global", on_change=update_cookie_moneda)
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados (Segmentación/3D/Térmico)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para calibrar y medir", value=st.session_state.pref_moneda, key="chk_moneda_global", on_change=update_cookie_moneda)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Mapas Avanzados", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             
             with st.expander("⏮️ Ver Evolución", expanded=False):
                 prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key="w_prev")
@@ -399,9 +408,13 @@ with col_center:
         elif modo == "📈 ECG": 
             if fs:=st.file_uploader("ECG", type=['jpg','pdf'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
-        elif modo == "💀 RX/TAC": 
-            if fs:=st.file_uploader("RX", type=['jpg','png'], accept_multiple_files=True): 
-                for f in fs: archivos.append(("img",f))
+                
+        # --- NUEVO SOPORTE MULTI-VIDEO PARA RESONANCIA/TAC/RX ---
+        elif modo == "💀 RX/TAC/Resonancia": 
+            st.info("💀 **Modo Imagenología**: Sube múltiples imágenes (RX) o videos (TAC/Resonancia)")
+            if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
+                for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
+                
         elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
 
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
@@ -410,7 +423,6 @@ with col_center:
         notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas...")
         nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
-        # CONTENEDOR PARA GALERÍA DE IMÁGENES
         galeria_avanzada = []
 
         if st.button("🚀 ANALIZAR", type="primary"):
@@ -424,7 +436,7 @@ with col_center:
                     model = genai.GenerativeModel("models/gemini-3-flash-preview")
                     
                     con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""
-                    datos_cv_texto = "" # Para el prompt
+                    datos_cv_texto = ""
 
                     # PROTOCOLO
                     final_proto_obj = None; is_local = False
@@ -457,16 +469,31 @@ with col_center:
 
                     if audio_val: con.append(genai.upload_file(audio_val, mime_type="audio/wav"))
                     
+                    img_display = None; img_thermal = None; img_prev_display = None
+                    
+                    # PROCESAMIENTO DE ARCHIVOS (IMÁGENES Y VIDEOS)
                     for label, a in archivos:
-                        if "video" in label: pass 
+                        if "video" in label:
+                            # --- RESTAURADA LÓGICA DE SUBIDA DE VIDEO (SOPORTA MÚLTIPLES) ---
+                            st.toast(f"⏳ Subiendo y procesando video: {a.name}...")
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf:
+                                tf.write(a.read())
+                                tp = tf.name
+                            vf = genai.upload_file(path=tp)
+                            while vf.state.name == "PROCESSING":
+                                time.sleep(2)
+                                vf = genai.get_file(vf.name)
+                            con.append(vf)
+                            os.remove(tp)
+                            st.toast(f"✅ Video listo para análisis")
                         else: 
+                            # Procesamiento de Imágenes Normal
                             img_pil = Image.open(a)
                             if ("Heridas" in modo or "Dermatología" in modo):
                                 if "prev" in label:
                                     con.append(img_pil)
                                 else:
                                     img_final_proc = img_pil
-                                    # Ghost Mode Align
                                     if st.session_state.img_previo and "Heridas" in modo:
                                         aligned, ghost_view = alinear_imagenes(st.session_state.img_previo, img_pil)
                                         if ghost_view:
@@ -474,14 +501,11 @@ with col_center:
                                             img_final_proc = aligned 
                                             st.toast("✨ Auto-Alineación completada")
                                     
-                                    # --- EJECUTAR SUITE CV AVANZADA ---
                                     cv_data = analisis_avanzado_heridas(img_final_proc, usar_moneda)
                                     
                                     if cv_data["area"] > 0: st.session_state.area_herida = cv_data["area"]
-                                    
                                     st.session_state.img_actual = cv_data["img_calibrada"]
                                     
-                                    # Generar texto técnico para el LLM
                                     datos_cv_texto = f"""
                                     [DATOS DE VISIÓN COMPUTACIONAL]:
                                     - Piel Fitzpatrick detectada: {cv_data['fitzpatrick']}
@@ -489,25 +513,23 @@ with col_center:
                                     - Riesgo de Isquemia Perilesional: {cv_data['isquemia']}
                                     """
                                     
-                                    # Añadir a la galería para mostrar después
                                     galeria_avanzada.append(("🗺️ Segmentación (Tejidos)", cv_data["img_segmentada"]))
                                     if cv_data["img_depth"]: galeria_avanzada.append(("🗻 Profundidad Relativa 3D", cv_data["img_depth"]))
                                     galeria_avanzada.append(("🌡️ Termografía Simulada", procesar_termografia(img_final_proc)))
 
-                                    # Darle las imágenes a la IA para que las vea
                                     con.append(cv_data["img_calibrada"])
                                     con.append(cv_data["img_segmentada"])
                             else: 
                                 img_final, proc = anonymize_face(img_pil)
                                 con.append(img_final)
 
-                    # --- PROMPT DINÁMICO ---
+                    # --- LÓGICA DINÁMICA DE LA CAJA VERDE SEGÚN EL MODO ---
                     if "Heridas" in modo:
                         titulo_caja_verde = "🛠️ CURA (Materiales del Protocolo)"
-                        instruccion_caja = 'En la caja "CURA", **EXTRAE Y RECOMIENDA** únicamente los productos con su **MARCA COMERCIAL** que aparezcan en el protocolo/farmacia adjuntos. Usa los DATOS DE VISIÓN COMPUTACIONAL para justificar tu decisión clínica.'
+                        instruccion_caja = 'En la caja "CURA", **EXTRAE Y RECOMIENDA** únicamente los productos con su **MARCA COMERCIAL** que aparezcan en el protocolo/farmacia adjuntos. Usa los DATOS DE VISIÓN COMPUTACIONAL para justificar tu decisión.'
                     else:
                         titulo_caja_verde = "💡 RECOMENDACIONES"
-                        instruccion_caja = 'En la caja "RECOMENDACIONES", detalla las pautas clínicas o siguientes pasos.'
+                        instruccion_caja = 'En la caja "RECOMENDACIONES", detalla las pautas clínicas, análisis de las imágenes/videos (RMN/TAC) o siguientes pasos.'
 
                     prompt = f"""
                     Rol: APN / Especialista. Contexto: {contexto}. Modo: {modo}.
@@ -523,8 +545,8 @@ with col_center:
                     2. {instruccion_caja}
                     
                     FORMATO HTML REQUERIDO:
-                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO:</b><br>[Diagnóstico integrando isquemia/bordes si aplica]</div>
-                    <div class="action-box"><b>⚡ ACCIÓN:</b><br>[Acciones inmediatas]</div>
+                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Detalle clínico de las imágenes o videos]</div>
+                    <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Acciones a tomar]</div>
                     <div class="material-box"><b>{titulo_caja_verde}:</b><br>[Contenido específico]</div>
                     """
                     
@@ -557,7 +579,6 @@ with col_center:
                     if st.session_state.resultado_analisis:
                         st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
-                    # MOSTRAR MAPAS AVANZADOS
                     if mostrar_imagenes and galeria_avanzada:
                         st.markdown("##### 🔬 Mapas Clínicos Extraídos")
                         cols = st.columns(len(galeria_avanzada))
