@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.9", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 92.0 (SAM 2 & God Mode)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -81,7 +81,7 @@ if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofil
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
 
-# V91.0 - Variables Cinemática + Segmentación POCUS
+# Variables Cinemática + Segmentación POCUS
 if "pocus_m_mode" not in st.session_state: st.session_state.pocus_m_mode = None
 if "pocus_flow_map" not in st.session_state: st.session_state.pocus_flow_map = None
 if "pocus_endo_map" not in st.session_state: st.session_state.pocus_endo_map = None
@@ -138,7 +138,7 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      FUNCIONES VISIÓN & CLÍNICAS
+#      FUNCIONES VISIÓN & CLÍNICAS 
 # ==========================================
 
 def procesar_pocus_nivel10(video_path):
@@ -369,6 +369,36 @@ def detectar_biofilm(pil_image):
         return Image.fromarray(img_res), len(contours) > 0
     except: return pil_image, False
 
+# --- NUEVO NÚCLEO HÍBRIDO DE SEGMENTACIÓN (SAM + OpenCV) ---
+def aislar_herida_nucleo(img_bgr):
+    """
+    Intenta usar Deep Learning (MobileSAM) para aislar la úlcera del fondo.
+    Si falla o no está instalado, hace un fallback indetectable a OpenCV (HSV).
+    """
+    try:
+        from ultralytics import SAM
+        # Intentamos instanciar el modelo ligero (se descargará solo la primera vez)
+        model = SAM("mobile_sam.pt")
+        h, w = img_bgr.shape[:2]
+        
+        # Le decimos a SAM que asuma que la herida está en el centro de la foto
+        resultados = model(img_bgr, points=[[w // 2, h // 2]], labels=[1], device="cpu", verbose=False)
+        
+        if resultados and len(resultados) > 0 and resultados[0].masks is not None:
+            mask = resultados[0].masks.data[0].cpu().numpy()
+            mask = cv2.resize(mask, (w, h))
+            mask_bin = (mask * 255).astype(np.uint8)
+            return mask_bin, "DL (MobileSAM)"
+    except Exception as e:
+        pass # Fallback silencioso a OpenCV
+        
+    # Método Clásico OpenCV (Umbrales de Color)
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
+    mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
+    mask_herida = cv2.morphologyEx(mask1 + mask2, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+    return mask_herida, "CV2 (HSV)"
+
 def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     img_np = np.array(pil_image.convert('RGB'))
     img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -376,6 +406,7 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     img_calibrada = img_bgr.copy()
     pixels_per_cm = 100.0
     
+    # 1. Calibración Numérica (OpenCV sigue siendo el rey para círculos perfectos)
     circles = cv2.HoughCircles(cv2.GaussianBlur(gray, (9, 9), 2), cv2.HOUGH_GRADIENT, 1.2, 50, param1=100, param2=30, minRadius=20, maxRadius=300)
     if circles is not None and usar_moneda:
         circles = np.round(circles[0, :]).astype("int")
@@ -385,10 +416,8 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             pixels_per_cm = (r * 2) / 2.325
             break
 
-    hsv = cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2HSV)
-    mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
-    mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
-    mask_herida = cv2.morphologyEx(mask1 + mask2, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
+    # 2. Extracción de Máscara (El motor híbrido SAM/OpenCV)
+    mask_herida, motor_usado = aislar_herida_nucleo(img_calibrada)
     
     contours, _ = cv2.findContours(mask_herida, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     area_pixels_total = 0
@@ -405,9 +434,14 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     img_segmentada = img_calibrada.copy()
     img_depth = None
     p_nec, p_esf, p_gra = 0, 0, 0
+    
+    hsv = cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2HSV)
 
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
+        # Sello de agua del motor usado
+        cv2.putText(img_calibrada, f"Motor Visual: {motor_usado}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
         mask_piel = cv2.bitwise_not(mask_herida)
         mean_piel = cv2.mean(img_calibrada, mask=mask_piel)[:3]
         luma = 0.299*mean_piel[2] + 0.587*mean_piel[1] + 0.114*mean_piel[0]
@@ -602,7 +636,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.9")
+st.title("🩺 LabMind 92.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -982,7 +1016,6 @@ with col_center:
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # Extracción y limpieza exhaustiva de etiquetas de laboratorio
                     if match_riesgo := re.search(r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<|]+)', texto_generado):
                         try: st.session_state.patient_risk_factor = float(match_riesgo.group(1)); st.session_state.patient_risk_reason = match_riesgo.group(2).strip()
                         except: pass
@@ -1009,7 +1042,6 @@ with col_center:
                         texto_generado = texto_generado.replace('<div class="diagnosis-box">', caja_radiomica + '\n<div class="diagnosis-box">')
                     texto_generado = re.sub(r'CTR_RATIO:\s*[^\n<|]+', '', texto_generado)
                     
-                    # Limpiar posibles barras verticales " | " que hayan quedado huérfanas
                     texto_generado = re.sub(r'\s*\|\s*(?=\||\n|<|$)', '', texto_generado)
                     
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
