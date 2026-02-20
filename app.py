@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 92.2", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 92.3 (SAM Debug)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -81,6 +81,7 @@ if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofil
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
 
+# Variables Cinemática + Segmentación POCUS
 if "pocus_m_mode" not in st.session_state: st.session_state.pocus_m_mode = None
 if "pocus_flow_map" not in st.session_state: st.session_state.pocus_flow_map = None
 if "pocus_endo_map" not in st.session_state: st.session_state.pocus_endo_map = None
@@ -342,13 +343,11 @@ def detectar_biofilm(pil_image):
         return Image.fromarray(img_res), len(contours) > 0
     except: return pil_image, False
 
-# --- NUEVA FUNCIÓN OPTIMIZADA PARA NUBE (COMPRESOR INVISIBLE) ---
+# --- NUEVA FUNCIÓN CON CHIVATO DE ERROR ---
 def aislar_herida_nucleo(img_bgr):
     try:
         from ultralytics import SAM
         h, w = img_bgr.shape[:2]
-        
-        # 1. Compresor Invisible: Reducimos temporalmente a max 640px para no saturar RAM
         max_dim = 640
         scale = min(max_dim/w, max_dim/h)
         if scale < 1:
@@ -358,29 +357,20 @@ def aislar_herida_nucleo(img_bgr):
             img_resized = img_bgr
             new_w, new_h = w, h
 
-        # 2. Instanciamos modelo (lo descarga si no lo tiene)
         model = SAM("mobile_sam.pt")
-        
-        # 3. Le pedimos a SAM que mire al centro de la imagen COMPRIMIDA
         resultados = model(img_resized, points=[[new_w // 2, new_h // 2]], labels=[1], device="cpu", verbose=False)
         
         if resultados and len(resultados) > 0 and resultados[0].masks is not None:
             mask_small = resultados[0].masks.data[0].cpu().numpy()
-            
-            # 4. Estiramos la máscara obtenida al tamaño original de la foto HD del iPhone
             mask_full = cv2.resize(mask_small, (w, h))
             mask_bin = (mask_full * 255).astype(np.uint8)
             return mask_bin, "DL (MobileSAM)"
+        else:
+            return None, "CV2 (Mascara vacia)"
     except Exception as e:
-        # Fallback silencioso si incluso comprimida falla por timeout o RAM extrema
-        pass 
-        
-    # Método Clásico OpenCV (Umbrales de Color - Plan de Emergencia)
-    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
-    mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
-    mask_herida = cv2.morphologyEx(mask1 + mask2, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
-    return mask_herida, "CV2 (HSV)"
+        # AQUI CAPTURAMOS EL ERROR Y LO DEVOLVEMOS PARA VERLO EN LA PANTALLA
+        error_corto = str(e).replace("\n", " ")[:35]
+        return None, f"CV2 (Error: {error_corto})"
 
 def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     img_np = np.array(pil_image.convert('RGB'))
@@ -399,6 +389,13 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             break
 
     mask_herida, motor_usado = aislar_herida_nucleo(img_calibrada)
+    
+    # SI SAM HA FALLADO, EJECUTAMOS EL PLAN B AQUÍ
+    if mask_herida is None:
+        hsv_fallback = cv2.cvtColor(img_calibrada, cv2.COLOR_BGR2HSV)
+        mask1 = cv2.inRange(hsv_fallback, np.array([0, 50, 50]), np.array([10, 255, 255]))
+        mask2 = cv2.inRange(hsv_fallback, np.array([170, 50, 50]), np.array([180, 255, 255]))
+        mask_herida = cv2.morphologyEx(mask1 + mask2, cv2.MORPH_OPEN, np.ones((5,5), np.uint8))
     
     contours, _ = cv2.findContours(mask_herida, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     area_pixels_total = 0
@@ -420,7 +417,10 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
 
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
-        cv2.putText(img_calibrada, f"Motor Visual: {motor_usado}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # AQUI IMPRIMIMOS EL CHIVATO CON EL ERROR REAL
+        cv2.rectangle(img_calibrada, (0, 10), (450, 45), (0,0,0), -1)
+        cv2.putText(img_calibrada, f"{motor_usado}", (10, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         mask_piel = cv2.bitwise_not(mask_herida)
         mean_piel = cv2.mean(img_calibrada, mask=mask_piel)[:3]
@@ -548,7 +548,7 @@ def predecir_cierre_inteligente():
             <div class="push-badge">Score PUSH: {push_score}/17</div>
             <h4 style="margin-top:5px; color:#d32f2f;">🛑 Gemelo Digital: Pronóstico Fallido</h4>
             {alerta_muro}
-            <span style='font-size: 0.85rem; color: #555;'>Corrige los parámetros críticos.</span>
+            <span style='font-size: 0.85rem; color: #555;'>Corrige los parameters críticos.</span>
         </div>
         """
 
@@ -626,7 +626,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 92.2 (Anti-Crash)")
+st.title("🩺 LabMind 92.3 (SAM Debug)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
