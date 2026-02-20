@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 92.1", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 92.2", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -81,7 +81,6 @@ if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofil
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
 
-# Variables Cinemática + Segmentación POCUS
 if "pocus_m_mode" not in st.session_state: st.session_state.pocus_m_mode = None
 if "pocus_flow_map" not in st.session_state: st.session_state.pocus_flow_map = None
 if "pocus_endo_map" not in st.session_state: st.session_state.pocus_endo_map = None
@@ -146,22 +145,17 @@ def procesar_pocus_nivel10(video_path):
         cap = cv2.VideoCapture(video_path)
         ret, frame1 = cap.read()
         if not ret: return None, None, None, None, {}
-
         prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
         prvs = cv2.bilateralFilter(prvs, 9, 75, 75)
         h, w = prvs.shape
-
         m_mode_columns = []
         max_mag = np.zeros_like(prvs, dtype=np.float32)
-
         areas_anecoicas = []
         b_lines_total = 0
         has_doppler = False
         frame_count = 0
-
         lower_color = np.array([0, 50, 50])
         upper_color = np.array([179, 255, 255])
-
         best_endo_frame = frame1.copy()
         doppler_frame = np.zeros_like(frame1)
 
@@ -169,22 +163,17 @@ def procesar_pocus_nivel10(video_path):
             ret, frame2 = cap.read()
             if not ret: break
             frame_count += 1
-
             next_gray = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
             next_gray_smooth = cv2.bilateralFilter(next_gray, 9, 75, 75)
-
             m_mode_columns.append(next_gray_smooth[:, w//2])
-
             flow = cv2.calcOpticalFlowFarneback(prvs, next_gray_smooth, None, 0.5, 3, 15, 3, 5, 1.2, 0)
             mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
             max_mag = np.maximum(max_mag, mag)
             prvs = next_gray_smooth
-
             _, thresh_black = cv2.threshold(next_gray_smooth, 40, 255, cv2.THRESH_BINARY_INV)
             kernel = np.ones((5,5),np.uint8)
             thresh_black = cv2.morphologyEx(thresh_black, cv2.MORPH_OPEN, kernel)
             contours, _ = cv2.findContours(thresh_black, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
             max_area = 0
             best_c = None
             for c in contours:
@@ -195,53 +184,42 @@ def procesar_pocus_nivel10(video_path):
                     if area > max_area and area > (h*w*0.02) and 0.2*w < cx < 0.8*w:
                         max_area = area
                         best_c = c
-
             if best_c is not None:
                 areas_anecoicas.append(max_area)
                 if max_area == max(areas_anecoicas):
                     best_endo_frame = frame2.copy()
                     cv2.drawContours(best_endo_frame, [best_c], -1, (0, 255, 0), 2)
-
             hsv = cv2.cvtColor(frame2, cv2.COLOR_BGR2HSV)
             mask_color = cv2.inRange(hsv, lower_color, upper_color)
             if cv2.countNonZero(mask_color) > (h*w*0.005):
                 has_doppler = True
                 doppler_frame = cv2.bitwise_or(doppler_frame, cv2.bitwise_and(frame2, frame2, mask=mask_color))
-
             sobelx = cv2.Sobel(next_gray_smooth, cv2.CV_64F, 1, 0, ksize=5)
             abs_sobelx = np.absolute(sobelx)
             _, thresh_b = cv2.threshold(abs_sobelx, 200, 255, cv2.THRESH_BINARY)
             if cv2.countNonZero(thresh_b) > (h*w*0.02):
                 b_lines_total += 1
-
         cap.release()
-
         metrics = {}
         if len(areas_anecoicas) > 5:
             eda = max(areas_anecoicas)
             esa = min(areas_anecoicas)
             ef_est = ((eda - esa) / eda) * 100 if eda > 0 else 0
             metrics['FEVI_2D_Math'] = round(ef_est, 1)
-
         metrics['B_Lines_Spotted'] = b_lines_total > (frame_count * 0.1)
         metrics['Doppler_Active'] = has_doppler
-
         m_mode_pil, flow_pil, endo_pil, doppler_pil = None, None, None, None
-
         if len(m_mode_columns) > 0:
             m_mode_img = np.transpose(np.array(m_mode_columns))
             m_mode_img = cv2.resize(m_mode_img, (w, h))
             m_mode_pil = Image.fromarray(cv2.cvtColor(np.uint8(m_mode_img), cv2.COLOR_GRAY2RGB))
-
         max_mag_norm = cv2.normalize(max_mag, None, 0, 255, cv2.NORM_MINMAX)
         heatmap = cv2.applyColorMap(max_mag_norm.astype(np.uint8), cv2.COLORMAP_HOT)
         flow_overlay = cv2.addWeighted(cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB), 0.5, cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB), 0.8, 0)
         flow_pil = Image.fromarray(flow_overlay)
-
         endo_pil = Image.fromarray(cv2.cvtColor(best_endo_frame, cv2.COLOR_BGR2RGB))
         if has_doppler:
             doppler_pil = Image.fromarray(cv2.cvtColor(doppler_frame, cv2.COLOR_BGR2RGB))
-
         return m_mode_pil, flow_pil, endo_pil, doppler_pil, metrics
     except Exception as e:
         return None, None, None, None, {}
@@ -331,17 +309,13 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
             y2 = max(0, min(h, int(int(ymax) * h / 1000)))
             cx, cy = (x1+x2)//2, (y1+y2)//2
             radio = max((x2-x1)//2, (y2-y1)//2)
-            
-            # Dibujamos directamente la caja para mayor claridad
             cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 3) 
-            
             texto_label = label.strip().upper()
             escala_fuente = max(0.6, w/1000)
             grosor_fuente = max(2, int(w/500))
             (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, grosor_fuente)
             cv2.rectangle(img_cv, (x1, max(0, y1-h_txt-10)), (x1 + w_txt, max(0, y1)), (0,0,0), -1)
             cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
-            
             cv2.circle(heatmap_mask, (cx, cy), radio, 255, -1)
         except: pass
 
@@ -351,7 +325,6 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
     alpha_mask = heatmap_mask.astype(float) / 255.0
     alpha_mask = np.expand_dims(alpha_mask, axis=2)
     img_res = (img_cv * (1 - alpha_mask*0.4) + colored_heatmap * (alpha_mask*0.4)).astype(np.uint8)
-
     texto_limpio = re.sub(patron, '', texto)
     return Image.fromarray(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
 
@@ -369,21 +342,40 @@ def detectar_biofilm(pil_image):
         return Image.fromarray(img_res), len(contours) > 0
     except: return pil_image, False
 
+# --- NUEVA FUNCIÓN OPTIMIZADA PARA NUBE (COMPRESOR INVISIBLE) ---
 def aislar_herida_nucleo(img_bgr):
     try:
         from ultralytics import SAM
-        model = SAM("mobile_sam.pt")
         h, w = img_bgr.shape[:2]
-        resultados = model(img_bgr, points=[[w // 2, h // 2]], labels=[1], device="cpu", verbose=False)
+        
+        # 1. Compresor Invisible: Reducimos temporalmente a max 640px para no saturar RAM
+        max_dim = 640
+        scale = min(max_dim/w, max_dim/h)
+        if scale < 1:
+            new_w, new_h = int(w * scale), int(h * scale)
+            img_resized = cv2.resize(img_bgr, (new_w, new_h))
+        else:
+            img_resized = img_bgr
+            new_w, new_h = w, h
+
+        # 2. Instanciamos modelo (lo descarga si no lo tiene)
+        model = SAM("mobile_sam.pt")
+        
+        # 3. Le pedimos a SAM que mire al centro de la imagen COMPRIMIDA
+        resultados = model(img_resized, points=[[new_w // 2, new_h // 2]], labels=[1], device="cpu", verbose=False)
         
         if resultados and len(resultados) > 0 and resultados[0].masks is not None:
-            mask = resultados[0].masks.data[0].cpu().numpy()
-            mask = cv2.resize(mask, (w, h))
-            mask_bin = (mask * 255).astype(np.uint8)
+            mask_small = resultados[0].masks.data[0].cpu().numpy()
+            
+            # 4. Estiramos la máscara obtenida al tamaño original de la foto HD del iPhone
+            mask_full = cv2.resize(mask_small, (w, h))
+            mask_bin = (mask_full * 255).astype(np.uint8)
             return mask_bin, "DL (MobileSAM)"
     except Exception as e:
+        # Fallback silencioso si incluso comprimida falla por timeout o RAM extrema
         pass 
         
+    # Método Clásico OpenCV (Umbrales de Color - Plan de Emergencia)
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
     mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
@@ -610,7 +602,6 @@ def predecir_cierre_inteligente():
     </div>
     """
 
-# --- FIX: ADAPTADO A FPDF2 PARA EVITAR EL ERROR DE BYTEARRAY ---
 def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self): 
@@ -629,15 +620,13 @@ def create_pdf(texto_analisis):
     pdf.ln(5)
     clean = re.sub(r'<[^>]+>', '', texto_analisis).replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
     pdf.multi_cell(0, 5, txt=clean)
-    
-    # fpdf2 devuelve un bytearray nativo, solo lo convertimos a bytes para streamlit
     return bytes(pdf.output())
 
 # ==========================================
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 92.1")
+st.title("🩺 LabMind 92.2 (Anti-Crash)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
