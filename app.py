@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.0 (Autonomous Segmentation)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 91.2 (Ultra-Functional Analytics)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -35,6 +35,7 @@ st.markdown("""
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
     .radiomics-box { background-color: #f3e5f5; border-left: 6px solid #9c27b0; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #4a148c; font-family: sans-serif; }
     .pocus-box { background-color: #e0f2f1; border-left: 6px solid #00897b; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #004d40; font-family: sans-serif; }
+    .longevity-box { background-color: #fff8e1; border-left: 6px solid #ffc107; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #ff6f00; font-family: sans-serif; }
     
     .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
     .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -634,7 +635,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.0")
+st.title("🩺 LabMind 91.2 (Ultra-Functional Analytics)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -662,7 +663,7 @@ with col_center:
     with tab_analisis:
         st.subheader("1. Selección de Modo")
         modo = st.selectbox("Especialidad:", 
-                     ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🦇 Ecografía / POCUS", "🧩 Integral (Analizar Todo)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC/Resonancia", "📂 Informes"])
+                     ["🩹 Heridas / Úlceras", "🧴 Dermatología", "🦇 Ecografía / POCUS", "🧩 Integral (Analizar Todo)", "🩸 Analítica Funcional (Top Internista)", "💊 Farmacia", "📈 ECG", "💀 RX/TAC/Resonancia", "📂 Informes"])
         contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
         
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
@@ -720,17 +721,21 @@ with col_center:
             mostrar_imagenes = st.checkbox("👁️ Mostrar Vectores", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("ECG", type=['jpg','pdf', 'png'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
+        
         elif modo == "💀 RX/TAC/Resonancia": 
             mostrar_imagenes = st.checkbox("👁️ Activar Multiespectral", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("Imágenes/Videos (RX, TAC, RMN)", type=['jpg','png','mp4','mov'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("video" if "video" in f.type or "mp4" in f.name.lower() or "mov" in f.name.lower() else "img", f))
                 
+        elif modo == "🩸 Analítica Funcional (Top Internista)":
+            labs_files = st.file_uploader("Subir Analíticas Completas (PDF/IMG)", accept_multiple_files=True, key="lab_docs")
+            
         elif modo == "💊 Farmacia": meds_files = st.file_uploader("Receta", accept_multiple_files=True, key="p_docs")
         elif modo == "📂 Informes": reports_files = st.file_uploader("PDFs", accept_multiple_files=True, key="rep_docs")
 
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
         audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, patologías previas...")
+        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, patologías previas, o estilo de vida actual...")
         nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         galeria_avanzada = []
@@ -754,7 +759,7 @@ with col_center:
             st.session_state.patient_risk_factor = 1.0; st.session_state.patient_risk_reason = "Estándar"
             st.session_state.lab_albumin = None; st.session_state.lab_hba1c = None; st.session_state.lab_itb = None
             for key in list(st.session_state.keys()):
-                if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "audio_recorder"]: del st.session_state[key]
+                if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "lab_docs", "audio_recorder"]: del st.session_state[key]
             st.rerun()
 
         if btn_analizar:
@@ -889,6 +894,43 @@ with col_center:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
                         instruccion_modo = 'Enfoque: Cuidado de heridas. Recomienda MARCAS COMERCIALES basadas en protocolo.'
                         html_extra = """<div class="tissue-labels"><div style="width:G%" class="tissue-label-text">Granulación G%</div><div style="width:E%" class="tissue-label-text">Esfacelos E%</div><div style="width:N%" class="tissue-label-text">Necrosis N%</div></div><div class="tissue-bar-container"><div class="tissue-gran" style="width:G%"></div><div class="tissue-slough" style="width:E%"></div><div class="tissue-nec" style="width:N%"></div></div>"""
+                    
+                    elif "Analítica" in modo:
+                        titulo_caja = "💊 PLAN DE BIOHACKING Y SUPLEMENTACIÓN ORTOMOLECULAR"
+                        instruccion_modo = '''
+                        ERES UN MÉDICO INTERNISTA DE ÉLITE EXPERTO EN MEDICINA FUNCIONAL, PNI Y LONGEVIDAD.
+                        No buscas "enfermedad aguda", buscas "pérdida de vitalidad", "inflamación silenciosa" y "disfunción mitocondrial".
+                        
+                        INSTRUCCIONES CLÍNICAS EXTREMAS:
+                        1. APLICA RANGOS FUNCIONALES (LONGEVIDAD), NO DE LABORATORIO: 
+                           - TSH ideal: 0.5 - 2.0 (si >2.0 con síntomas, evalúa hipotiroidismo subclínico).
+                           - Ferritina ideal: 50 - 150 (si >150 con PCR alta, es reactante de fase aguda, no exceso de hierro real).
+                           - Vitamina D ideal: 50 - 70 ng/mL.
+                           - Triglicéridos (TG) ideales: < 70 mg/dL.
+                           - Ácido Úrico ideal: < 5.0 (si >5.0, relaciónalo con resistencia a insulina/fructosa, no solo gota).
+                           - Homocisteína ideal: < 7.0.
+                        
+                        2. CALCULA Y EXPLICA ESTOS RATIOS (OBLIGATORIO si hay datos):
+                           - Ratio TG/HDL (Índice Aterogénico): Si > 1.5 a 2.0 = Resistencia a insulina y partículas LDL pequeñas/densas (peligrosas).
+                           - Ratio AST/ALT (De Ritis): Si > 1 = desgaste, daño muscular, alcohol, o fallo mitocondrial. Si < 1 = Hígado graso incipiente.
+                           - NLR (Neutrófilos/Linfocitos): Si > 2.0 = Estrés crónico / Inflamación sistémica.
+                           - PLR (Plaquetas/Linfocitos): Si > 120 = Trombosis subclínica / Riesgo cardiovascular.
+                           - BUN/Creatinina: Si > 20 = Deshidratación o catabolismo proteico excesivo.
+                        
+                        3. TRIANGULACIÓN MULTISISTÉMICA (Busca la causa raíz):
+                           - Si el VCM (Volumen Corpuscular) está > 92, aunque sea "normal", asume déficit de metilación (Falta de B12/Folato activos) o hipotiroidismo celular.
+                           - Si el Magnesio sérico es "normal" pero la Fosfatasa Alcalina es muy baja (< 50), sospecha déficit grave de Zinc y Magnesio intracelular.
+                           - Si hay dislipidemia, evalúa SIEMPRE la función tiroidea (TSH/T3).
+                        
+                        ESTRUCTURA EXACTA DE TU RESPUESTA:
+                        A) "🚨 Biomarcadores Críticos y Ratios Calculados" (Muestra los ratios exactos y qué significan).
+                        B) "🔍 Hallazgos Subclínicos y Triangulación" (Conecta los puntos: ej. "Tu ácido úrico + tus triglicéridos indican...").
+                        C) "⏳ Estado Metabólico / Edad Biológica" (¿Está el paciente acelerando su envejecimiento celular?).
+                        
+                        (El plan de suplementación ponlo al final usando la caja asignada. DEBE SER PRECISO: Ej. Metilfolato no ácido fólico, Treonato o Bisglicinato de Magnesio, K2-MK7, etc.).
+                        '''
+                        html_extra = ""
+                        
                     elif "RX" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
                         instruccion_modo = 'Enfoque: Radiómica Cuantitativa. Calcula Índice Cardiotorácico. LECTURA SISTEMÁTICA ABCDE.'
@@ -927,7 +969,7 @@ with col_center:
                     prompt = f"""
                     Rol: Especialista Clínico V91. Contexto: {contexto}. Modo: {modo}. Zona: {st.session_state.punto_cuerpo}.
                     Notas: "{notas}"
-                    INPUTS: Protocolo: {txt_proto[:500]}... | Docs: {txt_meds[:500]}...
+                    INPUTS: Protocolo: {txt_proto[:500]}... | Docs: {txt_meds[:20000]}...
                     {datos_cv_texto}
                     
                     INSTRUCCIONES:
@@ -938,11 +980,16 @@ with col_center:
                     {instruccion_nlp_riesgo}
                     
                     FORMATO HTML REQUERIDO:
-                    <div class="diagnosis-box"><b>🚨 DIAGNÓSTICO / HALLAZGOS:</b><br>[Descripción]</div>
-                    <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Pasos urgentes]</div>
-                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones/Enfermería]</div>
+                    <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción]</div>
+                    <div class="action-box"><b>⚡ ACCIÓN / RIESGO INMEDIATO:</b><br>[Explicación]</div>
+                    <div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>
+                    <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones/Suplementación]</div>
                     {html_extra}
                     """
+
+                    # Para evitar que use las cajas de longevidad si no es analítica, limpiamos el prompt dinámicamente:
+                    if "Analítica" not in modo:
+                         prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>', '')
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
