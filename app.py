@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.7", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 91.8 (ECG Saliency)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -78,7 +78,6 @@ if "img_ghost" not in st.session_state: st.session_state.img_ghost = None
 if "img_marcada" not in st.session_state: st.session_state.img_marcada = None 
 if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
 if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
-if "ecg_vector_data" not in st.session_state: st.session_state.ecg_vector_data = None
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
 
@@ -139,7 +138,7 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      FUNCIONES VISIÓN & CLÍNICAS (V91)
+#      FUNCIONES VISIÓN & CLÍNICAS
 # ==========================================
 
 def procesar_pocus_nivel10(video_path):
@@ -270,26 +269,6 @@ def aislar_trazado_ecg(pil_image):
         return Image.fromarray(cv2.cvtColor(smooth, cv2.COLOR_GRAY2RGB))
     except: return pil_image
 
-def vectorizar_ecg_1d(img_aislada_pil):
-    try:
-        img_cv = cv2.cvtColor(np.array(img_aislada_pil), cv2.COLOR_RGB2GRAY)
-        _, thresh = cv2.threshold(img_cv, 127, 255, cv2.THRESH_BINARY_INV) 
-        
-        vector = []
-        h, w = thresh.shape
-        for x in range(w):
-            col = thresh[:, x]
-            y_indices = np.where(col > 0)[0]
-            if len(y_indices) > 0:
-                vector.append(h - np.mean(y_indices)) 
-            else:
-                vector.append(np.nan)
-                
-        df = pd.DataFrame({'Amplitud (mV rel)': vector})
-        df = df.interpolate().fillna(method='bfill').fillna(method='ffill')
-        return df
-    except: return None
-
 def hacer_slicing_ecg(pil_image):
     try:
         img_cv = cv2.cvtColor(np.array(pil_image.convert('RGB')), cv2.COLOR_RGB2BGR)
@@ -352,34 +331,32 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
             y2 = max(0, min(h, int(int(ymax) * h / 1000)))
             cx, cy = (x1+x2)//2, (y1+y2)//2
             radio = max((x2-x1)//2, (y2-y1)//2)
-            cv2.circle(heatmap_mask, (cx, cy), radio, 255, -1)
+            
+            # Dibujamos directamente la caja para mayor claridad en el ECG
+            cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 3) 
+            
             texto_label = label.strip().upper()
-            escala_fuente = max(0.5, w/1200)
-            grosor_fuente = max(1, int(w/600))
-            cv2.putText(img_cv, texto_label, (x1, max(0, y1-10)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
+            escala_fuente = max(0.6, w/1000)
+            grosor_fuente = max(2, int(w/500))
+            # Añadir fondo negro al texto para que sea legible
+            (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, grosor_fuente)
+            cv2.rectangle(img_cv, (x1, max(0, y1-h_txt-10)), (x1 + w_txt, max(0, y1)), (0,0,0), -1)
+            cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
+            
+            # También mantenemos la zona para el Heatmap
+            cv2.circle(heatmap_mask, (cx, cy), radio, 255, -1)
         except: pass
 
+    # Aplicamos el Heatmap suave de fondo
     heatmap_mask = cv2.GaussianBlur(heatmap_mask, (151, 151), 0)
     heatmap_mask = np.uint8(255 * (heatmap_mask / np.max(heatmap_mask))) if np.max(heatmap_mask) > 0 else np.uint8(heatmap_mask)
     colored_heatmap = cv2.applyColorMap(heatmap_mask, cv2.COLORMAP_JET)
     alpha_mask = heatmap_mask.astype(float) / 255.0
     alpha_mask = np.expand_dims(alpha_mask, axis=2)
-    img_res = (img_cv * (1 - alpha_mask*0.5) + colored_heatmap * (alpha_mask*0.5)).astype(np.uint8)
+    img_res = (img_cv * (1 - alpha_mask*0.4) + colored_heatmap * (alpha_mask*0.4)).astype(np.uint8)
 
     texto_limpio = re.sub(patron, '', texto)
     return Image.fromarray(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
-
-def procesar_termografia(pil_image):
-    try:
-        img = np.array(pil_image.convert('RGB'))
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-        _, a, _ = cv2.split(lab)
-        thermal_map = cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX)
-        thermal_colored = cv2.applyColorMap(thermal_map, cv2.COLORMAP_JET)
-        thermal_colored = cv2.GaussianBlur(thermal_colored, (15, 15), 0)
-        return Image.fromarray(cv2.cvtColor(thermal_colored, cv2.COLOR_BGR2RGB))
-    except: return pil_image
 
 def detectar_biofilm(pil_image):
     try:
@@ -628,33 +605,27 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.7")
+st.title("🩺 LabMind 91.8 (ECG Saliency)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
-    # --- SELECTOR DE MODELO IA DINÁMICO ---
     st.subheader("⚙️ Motor de IA")
     
-    # Auto-detectar modelos reales habilitados en tu API Key
     if st.session_state.autenticado and not st.session_state.modelos_disponibles:
         try:
             genai.configure(api_key=st.session_state.api_key)
             modelos_encontrados = []
             for m in genai.list_models():
-                # Filtramos para que solo coja modelos Gemini que soporten generación de texto
                 if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
                     modelos_encontrados.append(m.name.replace('models/', ''))
             
-            # Ordenamos alfabéticamente inverso para que los más nuevos (2.5, 3.0...) queden arriba
             if modelos_encontrados:
                 st.session_state.modelos_disponibles = sorted(modelos_encontrados, reverse=True)
             else:
                 st.session_state.modelos_disponibles = ["gemini-1.5-pro", "gemini-1.5-flash"]
         except Exception as e:
-            # Fallback seguro en caso de error de red
             st.session_state.modelos_disponibles = ["gemini-1.5-pro", "gemini-1.5-flash"]
 
-    # Si por algún motivo se renderiza antes de autenticar, mostramos algo genérico
     lista_para_mostrar = st.session_state.modelos_disponibles if st.session_state.modelos_disponibles else ["Inicia sesión primero..."]
     
     modelo_seleccionado = st.selectbox("Elige la versión de Gemini:", lista_para_mostrar)
@@ -741,7 +712,8 @@ with col_center:
                 for f in fs: archivos.append(("video", f))
 
         elif modo == "📈 ECG": 
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Vectores", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            # Cambiado el texto del checkbox para que sea más claro para ECG
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Localización de Alteraciones (Saliency)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("ECG", type=['jpg','pdf', 'png'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
         
@@ -798,7 +770,6 @@ with col_center:
                 video_paths_local = []; primer_video_local = None 
                 try:
                     genai.configure(api_key=st.session_state.api_key)
-                    # AQUÍ SE USA EL MODELO ELEGIDO EN EL DESPLEGABLE
                     model = genai.GenerativeModel(st.session_state.modelo_seleccionado) 
                     con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""; datos_cv_texto = ""
 
@@ -806,15 +777,19 @@ with col_center:
                     if proto_uploaded: final_proto_obj = proto_uploaded
                     elif using_fixed_proto and fixed_proto_path: final_proto_obj = fixed_proto_path; is_local = True
 
+                    # BLOQUEO DE PROTOCOLO PARA EVITAR ALUCINACIONES DE APÓSITOS
                     if final_proto_obj:
-                        if is_local: file_handle = open(fixed_proto_path, "rb")
-                        else: file_handle = final_proto_obj
-                        
-                        if "pdf" in getattr(file_handle, 'name', '').lower() or (is_local and fixed_proto_path.endswith(".pdf")):
-                            r = pypdf.PdfReader(file_handle)
-                            txt_proto += "".join([p.extract_text() for p in r.pages])
+                        if "Heridas" in modo or "Dermatología" in modo:
+                            if is_local: file_handle = open(fixed_proto_path, "rb")
+                            else: file_handle = final_proto_obj
+                            
+                            if "pdf" in getattr(file_handle, 'name', '').lower() or (is_local and fixed_proto_path.endswith(".pdf")):
+                                r = pypdf.PdfReader(file_handle)
+                                txt_proto += "".join([p.extract_text() for p in r.pages])
+                            else:
+                                con.append(Image.open(file_handle)); txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]"
                         else:
-                            con.append(Image.open(file_handle)); txt_proto = "[PROTOCOLO EN IMAGEN ADJUNTA]"
+                            txt_proto = "[NO APLICA PROTOCOLO DE CURAS PARA ESTA ESPECIALIDAD]"
                     
                     for fs in [meds_files, labs_files, reports_files]:
                         if fs: 
@@ -876,9 +851,9 @@ with col_center:
                                 img_aislada = aislar_trazado_ecg(img_pil)
                                 img_slicing = hacer_slicing_ecg(img_pil)
                                 if img_slicing: con.append(img_slicing)
-                                df_vector = vectorizar_ecg_1d(img_aislada)
-                                st.session_state.ecg_vector_data = df_vector
+                                # Vectorización eliminada a petición del usuario, solo conservamos la imagen para marcado
                                 con.extend([img_pil, img_aislada])
+                                st.session_state.img_actual = img_pil # Guardamos la original para renderizarla si no hay marcas
                                 if mostrar_imagenes: 
                                     if img_slicing: galeria_avanzada.append(("🧩 Slicing 12-Leads", img_slicing))
                                     galeria_avanzada.append(("📈 Señal Eléctrica Aislada", img_aislada))
@@ -912,7 +887,6 @@ with col_center:
                                 elif "Dermatología" in modo:
                                     if "prev" in label: con.append(img_pil)
                                     else:
-                                        # No usamos segmentación de úlceras para Dermatología
                                         st.session_state.img_actual = img_pil
                                         con.append(img_pil)
                                 else: 
@@ -930,7 +904,7 @@ with col_center:
                     
                     elif "Dermatología" in modo:
                         titulo_caja = "🧴 PLAN DERMATOLÓGICO Y CUIDADOS"
-                        instruccion_modo = 'ERES UN DERMATÓLOGO CLÍNICO E INMUNÓLOGO DE ÉLITE. Analiza exhaustivamente la morfología de la lesión (macular, papular, eritematosa, descamativa, etc.). NO la trates como una herida abierta ni intentes curarla con apósitos o debridamiento. Busca patrones de enfermedades autoinmunes (Lupus, Psoriasis, Esclerodermia), inflamatorias sistémicas o eccemas. Sugiere diagnósticos diferenciales y pautas de tratamiento tópico/sistémico precisos.'
+                        instruccion_modo = 'ERES UN DERMATÓLOGO CLÍNICO E INMUNÓLOGO DE ÉLITE. Analiza exhaustivamente la morfología de la lesión. NO la trates como una herida abierta ni intentes curarla con apósitos. Sugiere diagnósticos diferenciales y pautas de tratamiento.'
                         html_extra = ""
 
                     elif "Analítica" in modo:
@@ -957,7 +931,8 @@ with col_center:
                         html_extra = ""
                     elif "ECG" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
-                        instruccion_modo = 'Enfoque: Cardiología. LECTURA SISTEMÁTICA: Frecuencia, Ritmo, Eje, Intervalos, Segmento ST.'
+                        # INSTRUCCIÓN BLINDADA PARA ECG
+                        instruccion_modo = 'Enfoque: Cardiología de Urgencias. LECTURA SISTEMÁTICA: Frecuencia, Ritmo, Eje, Intervalos, Segmento ST, Bloqueos. PROHIBIDO hablar de curas, heridas, apósitos o usar el protocolo general de la unidad. Eres un Cardiólogo puro.'
                         html_extra = ""
                     elif "Ecografía" in modo:
                         titulo_caja = "🦇 CUIDADOS Y MANEJO"
@@ -1008,7 +983,7 @@ with col_center:
                     {html_extra}
                     """
 
-                    # Para evitar que use las cajas de CoT o longevidad si no es analítica, limpiamos el prompt dinámicamente:
+                    # Limpieza dinámica del prompt
                     if "Analítica" not in modo:
                          prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>\n', '')
                          prompt = prompt.replace('[Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]\n', '')
@@ -1063,7 +1038,6 @@ with col_center:
                     with st.chat_message("user"): st.markdown(p)
                     with st.chat_message("assistant"):
                         try:
-                            # EL CHAT TAMBIÉN USA EL MOTOR SELECCIONADO
                             r = genai.GenerativeModel(st.session_state.modelo_seleccionado).generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{p}")
                             st.markdown(r.text); st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
                         except: st.error("Error chat")
@@ -1132,12 +1106,9 @@ with col_right:
                 st.markdown("#### 🦇 Video Ecográfico Original")
                 st.video(st.session_state.video_bytes)
                 
-            elif st.session_state.get("ecg_vector_data") is not None:
-                st.markdown("#### 📊 Vectorización 1D")
-                st.line_chart(st.session_state.ecg_vector_data, use_container_width=True)
-                
-            elif st.session_state.get("img_marcada"):
-                st.markdown("#### 🎯 Mapa de Calor")
+            # HEMOS ELIMINADO LA GRÁFICA VECTORIAL Y AHORA SE MUESTRAN DIRECTAMENTE LAS MARCAS DEL ECG
+            if st.session_state.get("img_marcada"):
+                st.markdown("#### 🎯 Localización de Alteraciones (Saliency)")
                 st.image(st.session_state.img_marcada, use_container_width=True)
             elif st.session_state.get("img_actual"):
                 st.image(st.session_state.img_actual, use_container_width=True)
