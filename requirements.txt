@@ -8,4 +8,6 @@ numpy
 pandas
 extra-streamlit-components
 ultralytics
+streamlit-drawable-canvas
+requests
 
