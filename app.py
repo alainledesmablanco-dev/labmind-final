@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.3 (Ultra-Functional God Mode)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 91.4 (Ultra-Derm & God Mode)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -141,7 +141,6 @@ if not st.session_state.autenticado:
 #      FUNCIONES VISIÓN & CLÍNICAS (V91)
 # ==========================================
 
-# V91.0: POCUS NIVEL 10 (SEGMENTACIÓN AUTÓNOMA Y RADIÓMICA)
 def procesar_pocus_nivel10(video_path):
     try:
         cap = cv2.VideoCapture(video_path)
@@ -155,7 +154,6 @@ def procesar_pocus_nivel10(video_path):
         m_mode_columns = []
         max_mag = np.zeros_like(prvs, dtype=np.float32)
 
-        # Variables radiómicas
         areas_anecoicas = []
         b_lines_total = 0
         has_doppler = False
@@ -175,16 +173,13 @@ def procesar_pocus_nivel10(video_path):
             next_gray = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
             next_gray_smooth = cv2.bilateralFilter(next_gray, 9, 75, 75)
 
-            # 1. Modo M (Temporalidad)
             m_mode_columns.append(next_gray_smooth[:, w//2])
 
-            # 2. Flujo Óptico (Contractilidad)
             flow = cv2.calcOpticalFlowFarneback(prvs, next_gray_smooth, None, 0.5, 3, 15, 3, 5, 1.2, 0)
             mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
             max_mag = np.maximum(max_mag, mag)
             prvs = next_gray_smooth
 
-            # 3. Segmentación Activa de Endocardio (Auto-EF%)
             _, thresh_black = cv2.threshold(next_gray_smooth, 40, 255, cv2.THRESH_BINARY_INV)
             kernel = np.ones((5,5),np.uint8)
             thresh_black = cv2.morphologyEx(thresh_black, cv2.MORPH_OPEN, kernel)
@@ -203,18 +198,16 @@ def procesar_pocus_nivel10(video_path):
 
             if best_c is not None:
                 areas_anecoicas.append(max_area)
-                if max_area == max(areas_anecoicas): # Capturamos el frame con el ventrículo más lleno (Diástole)
+                if max_area == max(areas_anecoicas):
                     best_endo_frame = frame2.copy()
                     cv2.drawContours(best_endo_frame, [best_c], -1, (0, 255, 0), 2)
 
-            # 4. Aislamiento Doppler Color (Válvulas)
             hsv = cv2.cvtColor(frame2, cv2.COLOR_BGR2HSV)
             mask_color = cv2.inRange(hsv, lower_color, upper_color)
             if cv2.countNonZero(mask_color) > (h*w*0.005):
                 has_doppler = True
                 doppler_frame = cv2.bitwise_or(doppler_frame, cv2.bitwise_and(frame2, frame2, mask=mask_color))
 
-            # 5. Radar Pleural (Líneas B vía Filtro Sobel)
             sobelx = cv2.Sobel(next_gray_smooth, cv2.CV_64F, 1, 0, ksize=5)
             abs_sobelx = np.absolute(sobelx)
             _, thresh_b = cv2.threshold(abs_sobelx, 200, 255, cv2.THRESH_BINARY)
@@ -223,18 +216,16 @@ def procesar_pocus_nivel10(video_path):
 
         cap.release()
 
-        # Consolidación Matemática
         metrics = {}
         if len(areas_anecoicas) > 5:
-            eda = max(areas_anecoicas) # End-Diastolic Area
-            esa = min(areas_anecoicas) # End-Systolic Area
+            eda = max(areas_anecoicas)
+            esa = min(areas_anecoicas)
             ef_est = ((eda - esa) / eda) * 100 if eda > 0 else 0
             metrics['FEVI_2D_Math'] = round(ef_est, 1)
 
-        metrics['B_Lines_Spotted'] = b_lines_total > (frame_count * 0.1) # Si aparecen líneas B en >10% del vídeo
+        metrics['B_Lines_Spotted'] = b_lines_total > (frame_count * 0.1)
         metrics['Doppler_Active'] = has_doppler
 
-        # Renderizado de Imágenes
         m_mode_pil, flow_pil, endo_pil, doppler_pil = None, None, None, None
 
         if len(m_mode_columns) > 0:
@@ -376,18 +367,6 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
 
     texto_limpio = re.sub(patron, '', texto)
     return Image.fromarray(cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
-
-def procesar_termografia(pil_image):
-    try:
-        img = np.array(pil_image.convert('RGB'))
-        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-        _, a, _ = cv2.split(lab)
-        thermal_map = cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX)
-        thermal_colored = cv2.applyColorMap(thermal_map, cv2.COLORMAP_JET)
-        thermal_colored = cv2.GaussianBlur(thermal_colored, (15, 15), 0)
-        return Image.fromarray(cv2.cvtColor(thermal_colored, cv2.COLOR_BGR2RGB))
-    except: return pil_image
 
 def detectar_biofilm(pil_image):
     try:
@@ -636,7 +615,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.3 (Ultra-Functional God Mode)")
+st.title("🩺 LabMind 91.4 (Ultra-Derm & God Mode)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -687,7 +666,7 @@ with col_center:
 
         elif modo == "🩹 Heridas / Úlceras" or modo == "🧴 Dermatología":
             usar_moneda = st.checkbox("🪙 Usar moneda de 1€ para calibrar", value=st.session_state.pref_moneda, key="chk_moneda_global", on_change=update_cookie_moneda)
-            mostrar_imagenes = st.checkbox("👁️ Mostrar Segmentación", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
+            mostrar_imagenes = st.checkbox("👁️ Mostrar Saliency / Marcas", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             with st.expander("⏮️ Ver Evolución", expanded=False):
                 prev = st.file_uploader("Foto Previa (Activa Modo Fantasma)", type=['jpg','png'], accept_multiple_files=True, key="w_prev")
                 if prev:
@@ -862,11 +841,13 @@ with col_center:
                                 
                             else:
                                 if not imagen_principal_para_marcar: imagen_principal_para_marcar = img_pil
-                                if ("Heridas" in modo or "Dermatología" in modo):
+                                
+                                # SEPARACIÓN CRÍTICA: Heridas vs Dermatología
+                                if "Heridas" in modo:
                                     if "prev" in label: con.append(img_pil)
                                     else:
                                         img_final_proc = img_pil
-                                        if st.session_state.img_previo and "Heridas" in modo:
+                                        if st.session_state.img_previo:
                                             aligned, ghost_view = alinear_imagenes(st.session_state.img_previo, img_pil)
                                             if ghost_view: st.session_state.img_ghost = ghost_view; img_final_proc = aligned 
                                         
@@ -883,19 +864,31 @@ with col_center:
                                         """
                                         galeria_avanzada.append(("🗺️ Segmentación", cv_data["img_segmentada"]))
                                         con.append(cv_data["img_calibrada"]); con.append(cv_data["img_segmentada"])
+                                
+                                elif "Dermatología" in modo:
+                                    if "prev" in label: con.append(img_pil)
+                                    else:
+                                        # No usamos segmentación de úlceras para Dermatología
+                                        st.session_state.img_actual = img_pil
+                                        con.append(img_pil)
                                 else: 
-                                    img_final, _ = anonymize_face(img_pil)
-                                    st.session_state.img_actual = img_final; con.append(img_final)
+                                    st.session_state.img_actual = img_pil
+                                    con.append(img_pil)
 
                             if modo in ["💀 RX/TAC/Resonancia", "📈 ECG"] and not imagen_principal_para_marcar:
                                 imagen_principal_para_marcar = img_pil
 
                     # --- LÓGICA DINÁMICA DEL PROMPT ---
-                    if "Heridas" in modo or "Dermatología" in modo:
+                    if "Heridas" in modo:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
-                        instruccion_modo = 'Enfoque: Cuidado de heridas. Recomienda MARCAS COMERCIALES basadas en protocolo.'
+                        instruccion_modo = 'Enfoque: Cuidado de heridas y úlceras. Recomienda MARCAS COMERCIALES basadas en protocolo.'
                         html_extra = """<div class="tissue-labels"><div style="width:G%" class="tissue-label-text">Granulación G%</div><div style="width:E%" class="tissue-label-text">Esfacelos E%</div><div style="width:N%" class="tissue-label-text">Necrosis N%</div></div><div class="tissue-bar-container"><div class="tissue-gran" style="width:G%"></div><div class="tissue-slough" style="width:E%"></div><div class="tissue-nec" style="width:N%"></div></div>"""
                     
+                    elif "Dermatología" in modo:
+                        titulo_caja = "🧴 PLAN DERMATOLÓGICO Y CUIDADOS"
+                        instruccion_modo = 'ERES UN DERMATÓLOGO CLÍNICO E INMUNÓLOGO DE ÉLITE. Analiza exhaustivamente la morfología de la lesión (macular, papular, eritematosa, descamativa, etc.). NO la trates como una herida abierta ni intentes curarla con apósitos o debridamiento. Busca patrones de enfermedades autoinmunes (Lupus, Psoriasis, Esclerodermia), inflamatorias sistémicas o eccemas. Sugiere diagnósticos diferenciales y pautas de tratamiento tópico/sistémico precisos.'
+                        html_extra = ""
+
                     elif "Analítica" in modo:
                         titulo_caja = "💊 PLAN DE BIOHACKING Y SUPLEMENTACIÓN ORTOMOLECULAR"
                         instruccion_modo = '''
@@ -956,13 +949,13 @@ with col_center:
                     {datos_cv_texto}
                     
                     INSTRUCCIONES:
-                    1. Ve al grano usando las cajas.
+                    1. Ve al grano usando las cajas HTML.
                     2. {instruccion_modo}
                     {instruccion_bbox}
                     {instruccion_enfermeria}
                     {instruccion_nlp_riesgo}
                     
-                    FORMATO HTML REQUERIDO (Respeta este orden si es Analítica):
+                    FORMATO HTML REQUERIDO:
                     [Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]
                     <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción]</div>
                     <div class="action-box"><b>⚡ ACCIÓN / RIESGO INMEDIATO:</b><br>[Explicación]</div>
@@ -973,7 +966,7 @@ with col_center:
 
                     # Para evitar que use las cajas de CoT o longevidad si no es analítica, limpiamos el prompt dinámicamente:
                     if "Analítica" not in modo:
-                         prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>', '')
+                         prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>\n', '')
                          prompt = prompt.replace('[Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]\n', '')
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
@@ -1042,7 +1035,8 @@ with col_center:
 
 # --- COLUMNA 3 (VISOR CLÍNICO UNIVERSAL) ---
 with col_right:
-    if "Heridas" in modo or "Dermatología" in modo:
+    # NUEVA SEPARACIÓN VISUAL ENTRE HERIDAS Y DERMATOLOGÍA
+    if "Heridas" in modo:
         with st.expander("🔮 Visor y Predicción 3D", expanded=True):
             if len(st.session_state.historial_evolucion) > 0: st.markdown(predecir_cierre_inteligente(), unsafe_allow_html=True)
             if st.session_state.img_marcada:
@@ -1053,10 +1047,17 @@ with col_right:
                 st.image(st.session_state.img_ghost, use_container_width=True)
             if st.session_state.img_actual: st.image(st.session_state.img_actual, caption="Estado Actual", use_container_width=True)
             else: st.caption("Analiza una herida para ver la evolución visual.")
+            
+    elif "Dermatología" in modo:
+        with st.expander("🔍 Visor Dermatológico", expanded=True):
+            if st.session_state.img_marcada:
+                st.markdown("#### 🎯 Mapa de Calor (Saliency)")
+                st.image(st.session_state.img_marcada, use_container_width=True)
+            if st.session_state.img_actual: st.image(st.session_state.img_actual, caption="Imagen Analizada", use_container_width=True)
+            else: st.caption("Sube una imagen dermatológica para visualizarla.")
+            
     else:
         with st.expander("🔬 Visor Clínico Cuantitativo", expanded=True):
-            
-            # V91.0: DASHBOARD POCUS NIVEL 10
             metrics = st.session_state.get("pocus_metrics", {})
             if metrics:
                 st.markdown("### 🧮 Biometría POCUS Autónoma")
