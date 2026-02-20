@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.8 (ECG Saliency)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 91.9", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -332,22 +332,19 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None, video_path=None):
             cx, cy = (x1+x2)//2, (y1+y2)//2
             radio = max((x2-x1)//2, (y2-y1)//2)
             
-            # Dibujamos directamente la caja para mayor claridad en el ECG
+            # Dibujamos directamente la caja para mayor claridad
             cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 3) 
             
             texto_label = label.strip().upper()
             escala_fuente = max(0.6, w/1000)
             grosor_fuente = max(2, int(w/500))
-            # Añadir fondo negro al texto para que sea legible
             (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, grosor_fuente)
             cv2.rectangle(img_cv, (x1, max(0, y1-h_txt-10)), (x1 + w_txt, max(0, y1)), (0,0,0), -1)
             cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
             
-            # También mantenemos la zona para el Heatmap
             cv2.circle(heatmap_mask, (cx, cy), radio, 255, -1)
         except: pass
 
-    # Aplicamos el Heatmap suave de fondo
     heatmap_mask = cv2.GaussianBlur(heatmap_mask, (151, 151), 0)
     heatmap_mask = np.uint8(255 * (heatmap_mask / np.max(heatmap_mask))) if np.max(heatmap_mask) > 0 else np.uint8(heatmap_mask)
     colored_heatmap = cv2.applyColorMap(heatmap_mask, cv2.COLORMAP_JET)
@@ -605,7 +602,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.8 (ECG Saliency)")
+st.title("🩺 LabMind 91.9")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -712,7 +709,6 @@ with col_center:
                 for f in fs: archivos.append(("video", f))
 
         elif modo == "📈 ECG": 
-            # Cambiado el texto del checkbox para que sea más claro para ECG
             mostrar_imagenes = st.checkbox("👁️ Mostrar Localización de Alteraciones (Saliency)", value=st.session_state.pref_visual, key="chk_visual_global", on_change=update_cookie_visual)
             if fs:=st.file_uploader("ECG", type=['jpg','pdf', 'png'], accept_multiple_files=True): 
                 for f in fs: archivos.append(("img",f))
@@ -777,7 +773,6 @@ with col_center:
                     if proto_uploaded: final_proto_obj = proto_uploaded
                     elif using_fixed_proto and fixed_proto_path: final_proto_obj = fixed_proto_path; is_local = True
 
-                    # BLOQUEO DE PROTOCOLO PARA EVITAR ALUCINACIONES DE APÓSITOS
                     if final_proto_obj:
                         if "Heridas" in modo or "Dermatología" in modo:
                             if is_local: file_handle = open(fixed_proto_path, "rb")
@@ -814,7 +809,6 @@ with col_center:
                                 video_paths_local.append(tp)
                                 if not primer_video_local: primer_video_local = tp
                                 
-                                # V91.0: CINEMÁTICA POCUS NIVEL 10
                                 if modo == "🦇 Ecografía / POCUS":
                                     m_mode, flow_map, endo_map, doppler_map, p_metrics = procesar_pocus_nivel10(tp)
                                     st.session_state.pocus_metrics = p_metrics
@@ -851,9 +845,8 @@ with col_center:
                                 img_aislada = aislar_trazado_ecg(img_pil)
                                 img_slicing = hacer_slicing_ecg(img_pil)
                                 if img_slicing: con.append(img_slicing)
-                                # Vectorización eliminada a petición del usuario, solo conservamos la imagen para marcado
                                 con.extend([img_pil, img_aislada])
-                                st.session_state.img_actual = img_pil # Guardamos la original para renderizarla si no hay marcas
+                                st.session_state.img_actual = img_pil 
                                 if mostrar_imagenes: 
                                     if img_slicing: galeria_avanzada.append(("🧩 Slicing 12-Leads", img_slicing))
                                     galeria_avanzada.append(("📈 Señal Eléctrica Aislada", img_aislada))
@@ -861,7 +854,6 @@ with col_center:
                             else:
                                 if not imagen_principal_para_marcar: imagen_principal_para_marcar = img_pil
                                 
-                                # SEPARACIÓN CRÍTICA: Heridas vs Dermatología
                                 if "Heridas" in modo:
                                     if "prev" in label: con.append(img_pil)
                                     else:
@@ -931,7 +923,6 @@ with col_center:
                         html_extra = ""
                     elif "ECG" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
-                        # INSTRUCCIÓN BLINDADA PARA ECG
                         instruccion_modo = 'Enfoque: Cardiología de Urgencias. LECTURA SISTEMÁTICA: Frecuencia, Ritmo, Eje, Intervalos, Segmento ST, Bloqueos. PROHIBIDO hablar de curas, heridas, apósitos o usar el protocolo general de la unidad. Eres un Cardiólogo puro.'
                         html_extra = ""
                     elif "Ecografía" in modo:
@@ -956,9 +947,10 @@ with col_center:
                         instruccion_enfermeria = "4. ROL ENFERMERÍA: INCLUYE OBLIGATORIAMENTE un apartado de '👩‍⚕️ Cuidados de Enfermería'."
 
                     instruccion_nlp_riesgo = """
-                        5. INSTRUCCIÓN LABORATORIO: Busca Albúmina, HbA1c e ITB. Añade al final:
+                        5. INSTRUCCIÓN LABORATORIO: Busca Albúmina, HbA1c e ITB. SOLO si el dato está explícitamente en los documentos, añade al final:
                         LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor] | RISK_MULTIPLIER: [decimal] LABEL: [motivo]
-                        Para RX, añade: CTR_RATIO: [valor].
+                        SI NO HAY DATOS, NO ESCRIBAS LAS ETIQUETAS. Estrictamente prohibido escribir "LAB_ALBUMIN: N/A" o similares. Omítelo.
+                        Para RX, añade: CTR_RATIO: [valor] solo si aplica.
                     """
 
                     prompt = f"""
@@ -983,7 +975,6 @@ with col_center:
                     {html_extra}
                     """
 
-                    # Limpieza dinámica del prompt
                     if "Analítica" not in modo:
                          prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>\n', '')
                          prompt = prompt.replace('[Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]\n', '')
@@ -991,24 +982,35 @@ with col_center:
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # Extracción variables
-                    if match_riesgo := re.search(r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<]+)', texto_generado):
-                        try: st.session_state.patient_risk_factor = float(match_riesgo.group(1)); st.session_state.patient_risk_reason = match_riesgo.group(2).strip(); texto_generado = re.sub(r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<]+)', '', texto_generado)
+                    # Extracción y limpieza exhaustiva de etiquetas de laboratorio
+                    if match_riesgo := re.search(r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<|]+)', texto_generado):
+                        try: st.session_state.patient_risk_factor = float(match_riesgo.group(1)); st.session_state.patient_risk_reason = match_riesgo.group(2).strip()
                         except: pass
+                    texto_generado = re.sub(r'RISK_MULTIPLIER:\s*[^\n<|]+\s*LABEL:\s*[^\n<|]+', '', texto_generado)
+
                     if match_alb := re.search(r'LAB_ALBUMIN:\s*([\d\.,]+)', texto_generado):
-                        try: st.session_state.lab_albumin = float(match_alb.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_ALBUMIN:\s*([\d\.,]+)', '', texto_generado)
+                        try: st.session_state.lab_albumin = float(match_alb.group(1).replace(',','.'))
                         except: pass
+                    texto_generado = re.sub(r'LAB_ALBUMIN:\s*[^\n<|]+', '', texto_generado)
+
                     if match_hba1c := re.search(r'LAB_HBA1C:\s*([\d\.,]+)', texto_generado):
-                        try: st.session_state.lab_hba1c = float(match_hba1c.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_HBA1C:\s*([\d\.,]+)', '', texto_generado)
+                        try: st.session_state.lab_hba1c = float(match_hba1c.group(1).replace(',','.'))
                         except: pass
+                    texto_generado = re.sub(r'LAB_HBA1C:\s*[^\n<|]+', '', texto_generado)
+
                     if match_itb := re.search(r'LAB_ITB:\s*([\d\.,]+)', texto_generado):
-                        try: st.session_state.lab_itb = float(match_itb.group(1).replace(',','.')); texto_generado = re.sub(r'LAB_ITB:\s*([\d\.,]+)', '', texto_generado)
+                        try: st.session_state.lab_itb = float(match_itb.group(1).replace(',','.'))
                         except: pass
+                    texto_generado = re.sub(r'LAB_ITB:\s*[^\n<|]+', '', texto_generado)
+
                     if match_ctr := re.search(r'CTR_RATIO:\s*([\d\.,]+)', texto_generado):
                         val_ctr = match_ctr.group(1)
                         caja_radiomica = f'<div class="radiomics-box"><b>📐 Radiómica Cuantitativa:</b><br>Índice Cardiotorácico calculado: {val_ctr} (Límite normal < 0.50).</div>'
                         texto_generado = texto_generado.replace('<div class="diagnosis-box">', caja_radiomica + '\n<div class="diagnosis-box">')
-                        texto_generado = re.sub(r'CTR_RATIO:\s*([\d\.,]+)', '', texto_generado)
+                    texto_generado = re.sub(r'CTR_RATIO:\s*[^\n<|]+', '', texto_generado)
+                    
+                    # Limpiar posibles barras verticales " | " que hayan quedado huérfanas
+                    texto_generado = re.sub(r'\s*\|\s*(?=\||\n|<|$)', '', texto_generado)
                     
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_principal_para_marcar, primer_video_local)
@@ -1106,7 +1108,6 @@ with col_right:
                 st.markdown("#### 🦇 Video Ecográfico Original")
                 st.video(st.session_state.video_bytes)
                 
-            # HEMOS ELIMINADO LA GRÁFICA VECTORIAL Y AHORA SE MUESTRAN DIRECTAMENTE LAS MARCAS DEL ECG
             if st.session_state.get("img_marcada"):
                 st.markdown("#### 🎯 Localización de Alteraciones (Saliency)")
                 st.image(st.session_state.img_marcada, use_container_width=True)
