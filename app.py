@@ -770,7 +770,7 @@ with col_center:
                 video_paths_local = []; primer_video_local = None 
                 try:
                     genai.configure(api_key=st.session_state.api_key)
-                    model = genai.GenerativeModel("models/gemini-1.5-pro") 
+                    model = genai.GenerativeModel("gemini-3-flash") 
                     con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""; datos_cv_texto = ""
 
                     final_proto_obj = None; is_local = False
@@ -994,7 +994,7 @@ with col_center:
                     with st.chat_message("user"): st.markdown(p)
                     with st.chat_message("assistant"):
                         try:
-                            r = genai.GenerativeModel("models/gemini-1.5-pro").generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{p}")
+                            r = genai.GenerativeModel("gemini-3-flash").generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{p}")
                             st.markdown(r.text); st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
                         except: st.error("Error chat")
 
