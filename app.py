@@ -13,11 +13,9 @@ import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
 import uuid
-import requests
-from streamlit_drawable_canvas import st_canvas
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 93.0 (Agent & Canvas)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 93.0", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -78,12 +76,10 @@ if "img_previo" not in st.session_state: st.session_state.img_previo = None
 if "img_actual" not in st.session_state: st.session_state.img_actual = None 
 if "img_ghost" not in st.session_state: st.session_state.img_ghost = None   
 if "img_marcada" not in st.session_state: st.session_state.img_marcada = None 
-if "img_marcada_canvas" not in st.session_state: st.session_state.img_marcada_canvas = None 
 if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
 if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
-if "agent_chat" not in st.session_state: st.session_state.agent_chat = None
 
 if "pocus_m_mode" not in st.session_state: st.session_state.pocus_m_mode = None
 if "pocus_flow_map" not in st.session_state: st.session_state.pocus_flow_map = None
@@ -139,47 +135,6 @@ if not st.session_state.autenticado:
             cookie_manager.set("labmind_secret_key", k, expires_at=expires)
             st.session_state.api_key = k; st.session_state.autenticado = True; st.rerun()
         st.stop()
-
-# ==========================================
-#      HERRAMIENTAS DE AGENTE IA (TOOLS)
-# ==========================================
-
-def buscar_literatura_pubmed(tema: str) -> str:
-    """Busca en la base de datos médica PubMed (NIH) artículos científicos recientes y devuelve los resúmenes y autores. Úsalo para dudas clínicas y papers."""
-    try:
-        url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={tema}&retmode=json&retmax=3"
-        res = requests.get(url).json()
-        ids = res.get('esearchresult', {}).get('idlist', [])
-        if not ids: return f"No se encontraron estudios en PubMed sobre: {tema}."
-        
-        url_sum = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={','.join(ids)}&retmode=json"
-        res_sum = requests.get(url_sum).json()
-        
-        text_res = "📚 **Resultados extraídos en tiempo real de PubMed:**\n"
-        for i in ids:
-            d = res_sum['result'][i]
-            text_res += f"- *{d.get('title')}* | Autores: {d.get('sortfirstauthor')} ({d.get('pubdate')}). Revista: {d.get('source')}\n"
-        return text_res
-    except Exception as e:
-        return f"Error accediendo a la API de PubMed: {e}"
-
-def comprobar_interaccion_rxnav(farmaco1: str, farmaco2: str) -> str:
-    """Consulta la API de la Librería Nacional de Medicina (RxNav) para comprobar interacciones cruzadas reales y peligrosas entre dos fármacos."""
-    try:
-        def get_id(name):
-            r = requests.get(f"https://rxnav.nlm.nih.gov/REST/rxcui.json?name={name}").json()
-            return r['idGroup']['rxnormId'][0] if 'rxnormId' in r['idGroup'] else None
-            
-        i1, i2 = get_id(farmaco1), get_id(farmaco2)
-        if not i1 or not i2: return f"No pude emparejar los fármacos ({farmaco1}, {farmaco2}) con los identificadores RxCUI de la base de datos oficial."
-        
-        r = requests.get(f"https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis={i1}+{i2}").json()
-        if 'fullInteractionTypeGroup' in r:
-            desc = r['fullInteractionTypeGroup'][0]['fullInteractionType'][0]['interactionPair'][0]['description']
-            return f"⚠️ **ALERTA CLINICA RXNAV:** Detectada interacción entre {farmaco1} y {farmaco2}. Detalle oficial: {desc}"
-        return f"✅ Base de datos RxNav: No se detectan interacciones mayores documentadas entre {farmaco1} y {farmaco2}."
-    except Exception as e:
-        return f"Error consultando RxNav: {e}"
 
 # ==========================================
 #      FUNCIONES VISIÓN & CLÍNICAS 
@@ -641,6 +596,7 @@ def predecir_cierre_inteligente():
     </div>
     """
 
+# --- FILTRO PDF TITANIO (Ignora emojis y caracteres no admitidos) ---
 def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self): 
@@ -657,7 +613,11 @@ def create_pdf(texto_analisis):
     pdf.set_font("helvetica", size=10)
     pdf.cell(0, 10, f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
+    
     clean = re.sub(r'<[^>]+>', '', texto_analisis).replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
+    # Filtro matemático: Solo deja pasar caracteres tradicionales (ISO-8859-1). Emojis fuera.
+    clean = "".join(c for c in clean if ord(c) < 256)
+    
     pdf.multi_cell(0, 5, txt=clean)
     return bytes(pdf.output())
 
@@ -665,7 +625,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 93.0 (Agent & Canvas)")
+st.title("🩺 LabMind 93.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -805,9 +765,8 @@ with col_center:
             st.session_state.historial_evolucion = []; st.session_state.area_herida = 0.0
             st.session_state.chat_messages = []; st.session_state.img_previo = None 
             st.session_state.img_actual = None; st.session_state.img_ghost = None   
-            st.session_state.img_marcada = None; st.session_state.img_marcada_canvas = None
-            st.session_state.last_cv_data = None; st.session_state.last_biofilm_detected = False
-            st.session_state.video_bytes = None; st.session_state.agent_chat = None
+            st.session_state.img_marcada = None; st.session_state.last_cv_data = None 
+            st.session_state.last_biofilm_detected = False; st.session_state.video_bytes = None 
             st.session_state.pocus_m_mode = None; st.session_state.pocus_flow_map = None
             st.session_state.pocus_endo_map = None; st.session_state.pocus_doppler_map = None
             st.session_state.pocus_metrics = {}; st.session_state.patient_risk_factor = 1.0
@@ -818,9 +777,9 @@ with col_center:
             st.rerun()
 
         if btn_analizar:
-            st.session_state.log_privacidad = []; st.session_state.chat_messages = []; st.session_state.agent_chat = None
+            st.session_state.log_privacidad = []; st.session_state.chat_messages = []
             st.session_state.img_actual = None; st.session_state.img_ghost = None; st.session_state.img_marcada = None 
-            st.session_state.img_marcada_canvas = None; st.session_state.last_biofilm_detected = False; st.session_state.video_bytes = None
+            st.session_state.last_biofilm_detected = False; st.session_state.video_bytes = None
             st.session_state.pocus_m_mode = None; st.session_state.pocus_flow_map = None
             st.session_state.pocus_endo_map = None; st.session_state.pocus_doppler_map = None
             st.session_state.pocus_metrics = {}; st.session_state.lab_albumin = None
@@ -952,6 +911,7 @@ with col_center:
                             if modo in ["💀 RX/TAC/Resonancia", "📈 ECG"] and not imagen_principal_para_marcar:
                                 imagen_principal_para_marcar = img_pil
 
+                    # --- LÓGICA DINÁMICA DEL PROMPT ---
                     if "Heridas" in modo:
                         titulo_caja = "🛠️ CURA / TRATAMIENTO LOCAL"
                         instruccion_modo = 'Enfoque: Cuidado de heridas y úlceras. Recomienda MARCAS COMERCIALES basadas en protocolo.'
@@ -966,52 +926,86 @@ with col_center:
                         titulo_caja = "💊 PLAN DE BIOHACKING Y SUPLEMENTACIÓN ORTOMOLECULAR"
                         instruccion_modo = '''
                         ERES UN MÉDICO INTERNISTA DE ÉLITE EXPERTO EN BIOHACKING, PNI Y LONGEVIDAD.
+                        
                         INSTRUCCIÓN CRÍTICA (CHAIN-OF-THOUGHT EXPLICITO):
                         ESTÁS OBLIGADO a escribir tu proceso de razonamiento paso a paso dentro de una caja HTML específica ANTES de dar el diagnóstico.
                         En ese razonamiento debes:
                         1. Calcular ratios (TyG, TG/HDL, AST/ALT, NLR, BUN/Creatinina).
                         2. Aplicar rangos funcionales/longevidad (TSH < 2.0, Ferritina 50-150, Vitamina D > 50, TG < 70).
+                        3. Triangular datos (ej. relacionar VCM con metilación, o Ácido Úrico con resistencia a la insulina).
+                        
                         ESTRUCTURA EXACTA DE TU RESPUESTA:
                         1. PRIMERO: <div class="cot-box"><b>🧠 Razonamiento Clínico Interno:</b><br>[Escribe aquí tu análisis paso a paso, cálculos y deducciones crudas]</div>
-                        2. LUEGO, las cajas finales para el usuario.
+                        2. LUEGO, las cajas finales para el usuario (HALLAZGOS, ACCIÓN, EDAD BIOLÓGICA, SUPLEMENTACIÓN).
                         '''
                         html_extra = ""
-                    else:
+                        
+                    elif "RX" in modo:
                         titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
-                        instruccion_modo = 'Enfoque: Análisis Especializado.'
+                        instruccion_modo = 'Enfoque: Radiómica Cuantitativa. Calcula Índice Cardiotorácico. LECTURA SISTEMÁTICA ABCDE.'
+                        html_extra = ""
+                    elif "ECG" in modo:
+                        titulo_caja = "💡 MANEJO Y RECOMENDACIONES"
+                        instruccion_modo = 'Enfoque: Cardiología de Urgencias. LECTURA SISTEMÁTICA: Frecuencia, Ritmo, Eje, Intervalos, Segmento ST, Bloqueos. PROHIBIDO hablar de curas, heridas, o usar protocolos genéricos. Eres un Cardiólogo puro.'
+                        html_extra = ""
+                    elif "Ecografía" in modo:
+                        titulo_caja = "🦇 CUIDADOS Y MANEJO"
+                        instruccion_modo = 'Enfoque: POCUS. Úsalos métricas de Python (FEVI%, Líneas B) como VERDAD ABSOLUTA para tu diagnóstico.'
+                        html_extra = ""
+                    elif "Farmacia" in modo:
+                        titulo_caja = "💊 PAUTAS FARMACOLÓGICAS"
+                        instruccion_modo = 'Enfoque: Farmacología. Analiza interacciones y dosis.'
+                        html_extra = ""
+                    else:
+                        titulo_caja = "💡 PLAN INTEGRAL DE ACCIÓN"
+                        instruccion_modo = 'Enfoque: Evaluación general.'
                         html_extra = ""
 
-                    instruccion_bbox = "3. MAPA DE CALOR: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre." if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local) else ""
-                    instruccion_enfermeria = "4. ROL ENFERMERÍA: INCLUYE OBLIGATORIAMENTE un apartado de '👩‍⚕️ Cuidados de Enfermería'." if contexto in ["Hospitalización", "Residencia", "Urgencias", "UCI"] else ""
-                    instruccion_nlp_riesgo = """5. INSTRUCCIÓN LABORATORIO: Busca Albúmina, HbA1c e ITB. Añade al final: LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor] | RISK_MULTIPLIER: [decimal] LABEL: [motivo] (Solo si hay datos)."""
+                    instruccion_bbox = ""
+                    if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
+                        instruccion_bbox = "3. MAPA DE CALOR: Si identificas patología focal, añade al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre."
+                    
+                    instruccion_enfermeria = ""
+                    if contexto in ["Hospitalización", "Residencia", "Urgencias", "UCI"]:
+                        instruccion_enfermeria = "4. ROL ENFERMERÍA: INCLUYE OBLIGATORIAMENTE un apartado de '👩‍⚕️ Cuidados de Enfermería'."
 
+                    instruccion_nlp_riesgo = """
+                        5. INSTRUCCIÓN LABORATORIO: Busca Albúmina, HbA1c e ITB. SOLO si el dato está explícitamente en los documentos, añade al final:
+                        LAB_ALBUMIN: [valor] | LAB_HBA1C: [valor] | LAB_ITB: [valor] | RISK_MULTIPLIER: [decimal] LABEL: [motivo]
+                        Para RX, añade: CTR_RATIO: [valor] solo si aplica.
+                    """
+
+                    # PROMPT SUPER BLINDADO PARA EVITAR TEXTO GRIS Y MENCIONES A FALTA DE DATOS
                     prompt = f"""
-                    Rol: Especialista Clínico V91. Contexto: {contexto}. Modo: {modo}. Zona: {st.session_state.punto_cuerpo}.
+                    Rol: Especialista Clínico V93. Contexto: {contexto}. Modo: {modo}. Zona: {st.session_state.punto_cuerpo}.
                     Notas: "{notas}"
                     INPUTS: Protocolo: {txt_proto[:500]}... | Docs: {txt_meds[:20000]}...
                     {datos_cv_texto}
                     
-                    INSTRUCCIONES:
-                    1. Ve al grano usando las cajas HTML.
+                    INSTRUCCIONES CRÍTICAS MÁXIMAS:
+                    1. PROHIBIDO ESCRIBIR TEXTO LIBRE FUERA DE LAS CAJAS HTML. No escribas introducciones, ni resúmenes, ni saludos. Tu respuesta debe empezar DIRECTAMENTE con la etiqueta HTML <div class="diagnosis-box">.
                     2. {instruccion_modo}
                     {instruccion_bbox}
                     {instruccion_enfermeria}
                     {instruccion_nlp_riesgo}
+                    6. REGLA DE OMISIÓN: Si faltan datos de laboratorio, de paciente o analíticas, SIMPLEMENTE IGNÓRALOS. ESTÁ ESTRICTAMENTE PROHIBIDO escribir frases como "No se disponen de datos de laboratorio", "Faltan valores" o "No hay información".
                     
-                    FORMATO HTML REQUERIDO:
+                    FORMATO HTML REQUERIDO (No te salgas de este esquema):
                     [Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]
-                    <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción]</div>
+                    <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción directa]</div>
                     <div class="action-box"><b>⚡ ACCIÓN / RIESGO INMEDIATO:</b><br>[Explicación]</div>
                     <div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>
                     <div class="material-box"><b>{titulo_caja}:</b><br>[Recomendaciones/Suplementación]</div>
                     {html_extra}
                     """
-                    if "Analítica" not in modo: prompt = prompt.replace('<div class="longevity-box">', '').replace('[Si es analítica', '')
+
+                    if "Analítica" not in modo:
+                         prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>\n', '')
+                         prompt = prompt.replace('[Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]\n', '')
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
                     
-                    # Regex variables clínicas
                     if match_riesgo := re.search(r'RISK_MULTIPLIER:\s*([\d\.]+)\s*LABEL:\s*([^\n<|]+)', texto_generado):
                         try: st.session_state.patient_risk_factor = float(match_riesgo.group(1)); st.session_state.patient_risk_reason = match_riesgo.group(2).strip()
                         except: pass
@@ -1032,7 +1026,17 @@ with col_center:
                         except: pass
                     texto_generado = re.sub(r'LAB_ITB:\s*[^\n<|]+', '', texto_generado)
 
+                    if match_ctr := re.search(r'CTR_RATIO:\s*([\d\.,]+)', texto_generado):
+                        val_ctr = match_ctr.group(1)
+                        caja_radiomica = f'<div class="radiomics-box"><b>📐 Radiómica Cuantitativa:</b><br>Índice Cardiotorácico calculado: {val_ctr} (Límite normal < 0.50).</div>'
+                        texto_generado = texto_generado.replace('<div class="diagnosis-box">', caja_radiomica + '\n<div class="diagnosis-box">')
+                    texto_generado = re.sub(r'CTR_RATIO:\s*[^\n<|]+', '', texto_generado)
+                    
                     texto_generado = re.sub(r'\s*\|\s*(?=\||\n|<|$)', '', texto_generado)
+                    
+                    # GUILLOTINA DE TEXTO: Borra por la fuerza cualquier texto gris previo al primer DIV
+                    if "<div" in texto_generado:
+                        texto_generado = texto_generado[texto_generado.find("<div"):]
                     
                     if mostrar_imagenes and (imagen_principal_para_marcar or primer_video_local):
                         img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_principal_para_marcar, primer_video_local)
@@ -1054,40 +1058,17 @@ with col_center:
         if st.session_state.resultado_analisis:
             st.markdown(st.session_state.resultado_analisis.replace("```html","").replace("```",""), unsafe_allow_html=True)
             st.markdown("---")
-            with st.expander("💬 Chat Asistente (Agent Mode)", expanded=False):
-                # INICIALIZACIÓN DEL AGENTE (CON HERRAMIENTAS)
-                if st.session_state.agent_chat is None:
-                    agent_model = genai.GenerativeModel(
-                        st.session_state.modelo_seleccionado,
-                        tools=[buscar_literatura_pubmed, comprobar_interaccion_rxnav]
-                    )
-                    st.session_state.agent_chat = agent_model.start_chat(enable_automatic_function_calling=True)
-                
+            with st.expander("💬 Chat Asistente", expanded=False):
                 for m in st.session_state.chat_messages:
                     with st.chat_message(m["role"]): st.markdown(m["content"])
-                    
-                if p := st.chat_input("Ej: ¿Qué es la mancha que he marcado? / ¿Interactúa el Sintrom con la amiodarona?"):
+                if p := st.chat_input("Dudas sobre este caso..."):
                     st.session_state.chat_messages.append({"role": "user", "content": p})
                     with st.chat_message("user"): st.markdown(p)
                     with st.chat_message("assistant"):
-                        with st.spinner("El Agente está pensando (y buscando herramientas si es necesario)..."):
-                            try:
-                                # Construimos el prompt. Si es el primero, pasamos el contexto.
-                                actual_prompt = p
-                                if len(st.session_state.chat_messages) <= 1:
-                                    actual_prompt = f"REPORTE PREVIO: {st.session_state.resultado_analisis[:2000]}\n\nPREGUNTA DEL MÉDICO: {p}"
-                                
-                                # Si el usuario ha dibujado en el Canvas, adjuntamos ESA imagen exacta
-                                msg_payload = [actual_prompt]
-                                if st.session_state.get('img_marcada_canvas') is not None:
-                                    msg_payload.append(st.session_state.img_marcada_canvas)
-                                
-                                # Envío al Agente (Si necesita buscar en PubMed, lo hará aquí automáticamente)
-                                r = st.session_state.agent_chat.send_message(msg_payload)
-                                st.markdown(r.text)
-                                st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
-                            except Exception as e:
-                                st.error(f"Error del Agente: {e}")
+                        try:
+                            r = genai.GenerativeModel(st.session_state.modelo_seleccionado).generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{p}")
+                            st.markdown(r.text); st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
+                        except: st.error("Error chat")
 
         if st.session_state.pdf_bytes:
             st.download_button("📥 Descargar Informe Clínico PDF", st.session_state.pdf_bytes, "informe.pdf", "application/pdf")
@@ -1099,59 +1080,30 @@ with col_center:
             for item in reversed(st.session_state.history_db):
                 with st.expander(f"📅 {item['date']} | {item['note']}"): st.markdown(item['result'], unsafe_allow_html=True)
 
-# --- COLUMNA 3 (VISOR CLÍNICO UNIVERSAL E INTERACTIVO) ---
+# --- COLUMNA 3 (VISOR CLÍNICO UNIVERSAL) ---
 with col_right:
-    if "Heridas" in modo or "Dermatología" in modo:
-        with st.expander("🔮 Visor Interactivo y Predicción 3D", expanded=True):
-            if "Heridas" in modo and len(st.session_state.historial_evolucion) > 0: 
-                st.markdown(predecir_cierre_inteligente(), unsafe_allow_html=True)
-                
+    if "Heridas" in modo:
+        with st.expander("🔮 Visor y Predicción 3D", expanded=True):
+            if len(st.session_state.historial_evolucion) > 0: st.markdown(predecir_cierre_inteligente(), unsafe_allow_html=True)
             if st.session_state.img_marcada:
                 st.markdown("#### 🎯 Mapa de Calor (Saliency)")
                 st.image(st.session_state.img_marcada, use_container_width=True)
-                
             if st.session_state.img_ghost:
                 st.markdown("#### 👻 Ghost Mode (Alineación)")
                 st.image(st.session_state.img_ghost, use_container_width=True)
-                
-            # EL NUEVO LIENZO INTERACTIVO (CANVAS)
-            if st.session_state.img_actual:
-                st.markdown("#### 🎨 Lienzo de Interacción Clínica")
-                st.caption("Dibuja sobre la lesión y pregúntale al chat de la izquierda: *¿Qué tejido es este?*")
-                
-                bg_img = st.session_state.img_actual
-                w_base = 500
-                h_base = int(float(bg_img.height) * (w_base / float(bg_img.width))) if bg_img.width > 0 else 400
-                bg_resized = bg_img.resize((w_base, h_base))
-                
-                c_tool, c_color = st.columns([3, 1])
-                with c_tool: drawing_mode = st.selectbox("Herramienta:", ("✍️ Pincel", "📏 Línea", "🟩 Rectángulo", "⭕ Círculo", "🧹 Borrar"), label_visibility="collapsed")
-                with c_color: stroke_color = st.color_picker("Color", "#002BFF", label_visibility="collapsed")
-                
-                mode_map = {"✍️ Pincel": "freedraw", "📏 Línea": "line", "🟩 Rectángulo": "rect", "⭕ Círculo": "circle", "🧹 Borrar": "transform"}
-                
-                canvas_res = st_canvas(
-                    fill_color="rgba(0, 0, 0, 0)", # Transparente por dentro del círculo/rectángulo
-                    stroke_width=4,
-                    stroke_color=stroke_color,
-                    background_image=bg_resized,
-                    update_streamlit=True,
-                    width=w_base,
-                    height=h_base,
-                    drawing_mode=mode_map[drawing_mode],
-                    key="canvas_visor"
-                )
-                
-                if canvas_res.image_data is not None:
-                    # Capturamos el dibujo del usuario y lo mezclamos con la foto base
-                    drawn_layer = Image.fromarray(canvas_res.image_data.astype('uint8'), 'RGBA')
-                    merged_img = Image.alpha_composite(bg_resized.convert('RGBA'), drawn_layer).convert('RGB')
-                    st.session_state.img_marcada_canvas = merged_img
-            else: 
-                st.caption("Analiza una imagen para habilitar el visor interactivo.")
+            if st.session_state.img_actual: st.image(st.session_state.img_actual, caption="Estado Actual", use_container_width=True)
+            else: st.caption("Analiza una herida para ver la evolución visual.")
+            
+    elif "Dermatología" in modo:
+        with st.expander("🔍 Visor Dermatológico", expanded=True):
+            if st.session_state.img_marcada:
+                st.markdown("#### 🎯 Mapa de Calor (Saliency)")
+                st.image(st.session_state.img_marcada, use_container_width=True)
+            if st.session_state.img_actual: st.image(st.session_state.img_actual, caption="Imagen Analizada", use_container_width=True)
+            else: st.caption("Sube una imagen dermatológica para visualizarla.")
             
     else:
-        with st.expander("🔬 Visor Clínico Interactivo", expanded=True):
+        with st.expander("🔬 Visor Clínico Cuantitativo", expanded=True):
             metrics = st.session_state.get("pocus_metrics", {})
             if metrics:
                 st.markdown("### 🧮 Biometría POCUS Autónoma")
@@ -1162,39 +1114,31 @@ with col_right:
                 c2.metric("Radar Líneas B", blines_val)
                 st.divider()
 
-            # CANVA INTERACTIVO PARA RX Y ECG
-            if st.session_state.get("img_actual") and not st.session_state.get("img_marcada"):
-                st.markdown("#### 🎨 Lienzo de Interacción Clínica")
-                st.caption("Dibuja círculos en la RX o el ECG y pregunta al Chat: *¿Es esto un patrón intersticial?*")
+            if st.session_state.get("pocus_endo_map") is not None:
+                st.markdown("#### 🟢 Auto-Simpson (Segmentación Endocárdica)")
+                st.image(st.session_state.pocus_endo_map, use_container_width=True, caption="Trazado autónomo del ventrículo en diástole máxima.")
                 
-                bg_img = st.session_state.img_actual
-                w_base = 500
-                h_base = int(float(bg_img.height) * (w_base / float(bg_img.width))) if bg_img.width > 0 else 400
-                bg_resized = bg_img.resize((w_base, h_base))
+            if st.session_state.get("pocus_doppler_map") is not None:
+                st.markdown("#### 🩸 Extracción Doppler Aislada")
+                st.image(st.session_state.pocus_doppler_map, use_container_width=True, caption="Eliminación de grises para ver exclusivamente velocidades y turbulencias valvulares.")
+
+            if st.session_state.get("pocus_flow_map") is not None:
+                st.markdown("#### 🌀 Mapeo de Flujo Óptico (Contractilidad)")
+                st.image(st.session_state.pocus_flow_map, use_container_width=True)
+
+            if st.session_state.get("pocus_m_mode") is not None:
+                st.markdown("#### 🌊 Trazado Modo-M Temporal")
+                st.image(st.session_state.pocus_m_mode, use_container_width=True)
+
+            if st.session_state.get("video_bytes") is not None:
+                st.markdown("#### 🦇 Video Ecográfico Original")
+                st.video(st.session_state.video_bytes)
                 
-                c_tool, c_color = st.columns([3, 1])
-                with c_tool: drawing_mode = st.selectbox("Herramienta:", ("⭕ Círculo", "✍️ Pincel", "📏 Línea", "🟩 Rectángulo", "🧹 Borrar"), label_visibility="collapsed", key="tool_rx")
-                with c_color: stroke_color = st.color_picker("Color", "#FF0000", label_visibility="collapsed", key="col_rx")
-                mode_map = {"✍️ Pincel": "freedraw", "📏 Línea": "line", "🟩 Rectángulo": "rect", "⭕ Círculo": "circle", "🧹 Borrar": "transform"}
-                
-                canvas_res = st_canvas(
-                    fill_color="rgba(255, 0, 0, 0.2)",
-                    stroke_width=3,
-                    stroke_color=stroke_color,
-                    background_image=bg_resized,
-                    update_streamlit=True, width=w_base, height=h_base, drawing_mode=mode_map[drawing_mode], key="canvas_rx"
-                )
-                if canvas_res.image_data is not None:
-                    drawn_layer = Image.fromarray(canvas_res.image_data.astype('uint8'), 'RGBA')
-                    merged_img = Image.alpha_composite(bg_resized.convert('RGBA'), drawn_layer).convert('RGB')
-                    st.session_state.img_marcada_canvas = merged_img
-            
-            if st.session_state.get("img_marcada"): st.image(st.session_state.img_marcada, use_container_width=True, caption="Saliency / Localización")
-            if st.session_state.get("pocus_endo_map"): st.image(st.session_state.pocus_endo_map, use_container_width=True, caption="Auto-Simpson (Segmentación Endocárdica)")
-            if st.session_state.get("pocus_doppler_map"): st.image(st.session_state.pocus_doppler_map, use_container_width=True, caption="Extracción Doppler Aislada")
-            if st.session_state.get("pocus_flow_map"): st.image(st.session_state.pocus_flow_map, use_container_width=True, caption="Mapeo de Flujo Óptico (Contractilidad)")
-            if st.session_state.get("pocus_m_mode"): st.image(st.session_state.pocus_m_mode, use_container_width=True, caption="Trazado Modo-M Temporal")
-            if st.session_state.get("video_bytes"): st.video(st.session_state.video_bytes)
+            if st.session_state.get("img_marcada"):
+                st.markdown("#### 🎯 Localización de Alteraciones (Saliency)")
+                st.image(st.session_state.img_marcada, use_container_width=True)
+            elif st.session_state.get("img_actual"):
+                st.image(st.session_state.img_actual, use_container_width=True)
 
 st.divider()
 if st.button("🔒 Cerrar Sesión"):
