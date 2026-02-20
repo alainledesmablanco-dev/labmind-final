@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 92.0 (SAM 2 & God Mode)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 92.1", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -369,19 +369,11 @@ def detectar_biofilm(pil_image):
         return Image.fromarray(img_res), len(contours) > 0
     except: return pil_image, False
 
-# --- NUEVO NÚCLEO HÍBRIDO DE SEGMENTACIÓN (SAM + OpenCV) ---
 def aislar_herida_nucleo(img_bgr):
-    """
-    Intenta usar Deep Learning (MobileSAM) para aislar la úlcera del fondo.
-    Si falla o no está instalado, hace un fallback indetectable a OpenCV (HSV).
-    """
     try:
         from ultralytics import SAM
-        # Intentamos instanciar el modelo ligero (se descargará solo la primera vez)
         model = SAM("mobile_sam.pt")
         h, w = img_bgr.shape[:2]
-        
-        # Le decimos a SAM que asuma que la herida está en el centro de la foto
         resultados = model(img_bgr, points=[[w // 2, h // 2]], labels=[1], device="cpu", verbose=False)
         
         if resultados and len(resultados) > 0 and resultados[0].masks is not None:
@@ -390,9 +382,8 @@ def aislar_herida_nucleo(img_bgr):
             mask_bin = (mask * 255).astype(np.uint8)
             return mask_bin, "DL (MobileSAM)"
     except Exception as e:
-        pass # Fallback silencioso a OpenCV
+        pass 
         
-    # Método Clásico OpenCV (Umbrales de Color)
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     mask1 = cv2.inRange(hsv, np.array([0, 50, 50]), np.array([10, 255, 255]))
     mask2 = cv2.inRange(hsv, np.array([170, 50, 50]), np.array([180, 255, 255]))
@@ -406,7 +397,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
     img_calibrada = img_bgr.copy()
     pixels_per_cm = 100.0
     
-    # 1. Calibración Numérica (OpenCV sigue siendo el rey para círculos perfectos)
     circles = cv2.HoughCircles(cv2.GaussianBlur(gray, (9, 9), 2), cv2.HOUGH_GRADIENT, 1.2, 50, param1=100, param2=30, minRadius=20, maxRadius=300)
     if circles is not None and usar_moneda:
         circles = np.round(circles[0, :]).astype("int")
@@ -416,7 +406,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
             pixels_per_cm = (r * 2) / 2.325
             break
 
-    # 2. Extracción de Máscara (El motor híbrido SAM/OpenCV)
     mask_herida, motor_usado = aislar_herida_nucleo(img_calibrada)
     
     contours, _ = cv2.findContours(mask_herida, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -439,7 +428,6 @@ def analisis_avanzado_heridas(pil_image, usar_moneda=False):
 
     if best_contour is not None:
         cv2.drawContours(img_calibrada, [best_contour], -1, (0, 0, 255), 2)
-        # Sello de agua del motor usado
         cv2.putText(img_calibrada, f"Motor Visual: {motor_usado}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
         mask_piel = cv2.bitwise_not(mask_herida)
@@ -622,21 +610,34 @@ def predecir_cierre_inteligente():
     </div>
     """
 
+# --- FIX: ADAPTADO A FPDF2 PARA EVITAR EL ERROR DE BYTEARRAY ---
 def create_pdf(texto_analisis):
     class PDF(FPDF):
-        def header(self): self.set_font('Arial','B',12); self.cell(0,10,'LabMind - Informe IA',0,1,'C'); self.ln(5)
-        def footer(self): self.set_y(-15); self.set_font('Arial','I',8); self.cell(0,10,f'Pag {self.page_no()}',0,0,'C')
-    pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
-    pdf.cell(0,10,f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",0,1); pdf.ln(5)
+        def header(self): 
+            self.set_font('helvetica', 'B', 12)
+            self.cell(0, 10, 'LabMind - Informe IA', align='C', new_x="LMARGIN", new_y="NEXT")
+            self.ln(5)
+        def footer(self): 
+            self.set_y(-15)
+            self.set_font('helvetica', 'I', 8)
+            self.cell(0, 10, f'Pag {self.page_no()}', align='C')
+            
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", size=10)
+    pdf.cell(0, 10, f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
     clean = re.sub(r'<[^>]+>', '', texto_analisis).replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
-    pdf.multi_cell(0,5, clean.encode('latin-1','replace').decode('latin-1'))
-    return pdf.output(dest='S').encode('latin-1')
+    pdf.multi_cell(0, 5, txt=clean)
+    
+    # fpdf2 devuelve un bytearray nativo, solo lo convertimos a bytes para streamlit
+    return bytes(pdf.output())
 
 # ==========================================
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 92.0")
+st.title("🩺 LabMind 92.1")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -777,12 +778,12 @@ with col_center:
             st.session_state.chat_messages = []; st.session_state.img_previo = None 
             st.session_state.img_actual = None; st.session_state.img_ghost = None   
             st.session_state.img_marcada = None; st.session_state.last_cv_data = None 
-            st.session_state.last_biofilm_detected = False; st.session_state.ecg_vector_data = None
-            st.session_state.video_bytes = None; st.session_state.pocus_m_mode = None
-            st.session_state.pocus_flow_map = None; st.session_state.pocus_endo_map = None
-            st.session_state.pocus_doppler_map = None; st.session_state.pocus_metrics = {}
-            st.session_state.patient_risk_factor = 1.0; st.session_state.patient_risk_reason = "Estándar"
-            st.session_state.lab_albumin = None; st.session_state.lab_hba1c = None; st.session_state.lab_itb = None
+            st.session_state.last_biofilm_detected = False; st.session_state.video_bytes = None 
+            st.session_state.pocus_m_mode = None; st.session_state.pocus_flow_map = None
+            st.session_state.pocus_endo_map = None; st.session_state.pocus_doppler_map = None
+            st.session_state.pocus_metrics = {}; st.session_state.patient_risk_factor = 1.0
+            st.session_state.patient_risk_reason = "Estándar"; st.session_state.lab_albumin = None
+            st.session_state.lab_hba1c = None; st.session_state.lab_itb = None
             for key in list(st.session_state.keys()):
                 if key in ["int_meds", "int_labs", "int_main", "w_prev", "w_meds", "w_img", "p_docs", "rep_docs", "lab_docs", "audio_recorder"]: del st.session_state[key]
             st.rerun()
@@ -790,11 +791,11 @@ with col_center:
         if btn_analizar:
             st.session_state.log_privacidad = []; st.session_state.chat_messages = []
             st.session_state.img_actual = None; st.session_state.img_ghost = None; st.session_state.img_marcada = None 
-            st.session_state.last_biofilm_detected = False; st.session_state.ecg_vector_data = None
-            st.session_state.video_bytes = None; st.session_state.pocus_m_mode = None
-            st.session_state.pocus_flow_map = None; st.session_state.pocus_endo_map = None
-            st.session_state.pocus_doppler_map = None; st.session_state.pocus_metrics = {}
-            st.session_state.lab_albumin = None; st.session_state.lab_hba1c = None; st.session_state.lab_itb = None
+            st.session_state.last_biofilm_detected = False; st.session_state.video_bytes = None
+            st.session_state.pocus_m_mode = None; st.session_state.pocus_flow_map = None
+            st.session_state.pocus_endo_map = None; st.session_state.pocus_doppler_map = None
+            st.session_state.pocus_metrics = {}; st.session_state.lab_albumin = None
+            st.session_state.lab_hba1c = None; st.session_state.lab_itb = None
             
             with st.spinner(f"🧠 Computando Biomecánica Autónoma ({modo})..."):
                 video_paths_local = []; primer_video_local = None 
