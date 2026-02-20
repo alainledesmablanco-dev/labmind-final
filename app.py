@@ -15,7 +15,7 @@ import pandas as pd
 import uuid
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 91.2 (Ultra-Functional Analytics)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 91.3 (Ultra-Functional God Mode)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -30,6 +30,7 @@ st.markdown("""
         background-color: #2e7d32 !important; color: white !important; border: none !important;
     }
     
+    .cot-box { background-color: #f8f9fa; border: 1px dashed #6c757d; border-left: 5px solid #343a40; padding: 12px; border-radius: 5px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; color: #495057; }
     .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
     .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
     .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
@@ -635,7 +636,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 91.2 (Ultra-Functional Analytics)")
+st.title("🩺 LabMind 91.3 (Ultra-Functional God Mode)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -735,7 +736,7 @@ with col_center:
 
         st.markdown('<div class="pull-up"></div>', unsafe_allow_html=True)
         audio_val = st.audio_input("🎙️ Notas de Voz", key="audio_recorder", label_visibility="collapsed")
-        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, patologías previas, o estilo de vida actual...")
+        notas = st.text_area("Notas Clínicas:", height=60, placeholder="Escribe síntomas, patologías previas, resultados genéticos (ej. MTHFR) o datos de tu Oura Ring/Apple Watch...")
         nota_historial = st.text_input("🏷️ Etiqueta Historial (Opcional):", placeholder="Ej: Cama 304", label_visibility="collapsed")
 
         galeria_avanzada = []
@@ -775,7 +776,6 @@ with col_center:
                 video_paths_local = []; primer_video_local = None 
                 try:
                     genai.configure(api_key=st.session_state.api_key)
-                    # AQUÍ SE HA FORZADO LA VERSIÓN PREVIEW
                     model = genai.GenerativeModel("gemini-3-flash-preview") 
                     con = []; txt_meds = ""; txt_labs = ""; txt_reports = ""; txt_proto = ""; datos_cv_texto = ""
 
@@ -899,36 +899,18 @@ with col_center:
                     elif "Analítica" in modo:
                         titulo_caja = "💊 PLAN DE BIOHACKING Y SUPLEMENTACIÓN ORTOMOLECULAR"
                         instruccion_modo = '''
-                        ERES UN MÉDICO INTERNISTA DE ÉLITE EXPERTO EN MEDICINA FUNCIONAL, PNI Y LONGEVIDAD.
-                        No buscas "enfermedad aguda", buscas "pérdida de vitalidad", "inflamación silenciosa" y "disfunción mitocondrial".
+                        ERES UN MÉDICO INTERNISTA DE ÉLITE EXPERTO EN BIOHACKING, PNI Y LONGEVIDAD.
                         
-                        INSTRUCCIONES CLÍNICAS EXTREMAS:
-                        1. APLICA RANGOS FUNCIONALES (LONGEVIDAD), NO DE LABORATORIO: 
-                           - TSH ideal: 0.5 - 2.0 (si >2.0 con síntomas, evalúa hipotiroidismo subclínico).
-                           - Ferritina ideal: 50 - 150 (si >150 con PCR alta, es reactante de fase aguda, no exceso de hierro real).
-                           - Vitamina D ideal: 50 - 70 ng/mL.
-                           - Triglicéridos (TG) ideales: < 70 mg/dL.
-                           - Ácido Úrico ideal: < 5.0 (si >5.0, relaciónalo con resistencia a insulina/fructosa, no solo gota).
-                           - Homocisteína ideal: < 7.0.
-                        
-                        2. CALCULA Y EXPLICA ESTOS RATIOS (OBLIGATORIO si hay datos):
-                           - Ratio TG/HDL (Índice Aterogénico): Si > 1.5 a 2.0 = Resistencia a insulina y partículas LDL pequeñas/densas (peligrosas).
-                           - Ratio AST/ALT (De Ritis): Si > 1 = desgaste, daño muscular, alcohol, o fallo mitocondrial. Si < 1 = Hígado graso incipiente.
-                           - NLR (Neutrófilos/Linfocitos): Si > 2.0 = Estrés crónico / Inflamación sistémica.
-                           - PLR (Plaquetas/Linfocitos): Si > 120 = Trombosis subclínica / Riesgo cardiovascular.
-                           - BUN/Creatinina: Si > 20 = Deshidratación o catabolismo proteico excesivo.
-                        
-                        3. TRIANGULACIÓN MULTISISTÉMICA (Busca la causa raíz):
-                           - Si el VCM (Volumen Corpuscular) está > 92, aunque sea "normal", asume déficit de metilación (Falta de B12/Folato activos) o hipotiroidismo celular.
-                           - Si el Magnesio sérico es "normal" pero la Fosfatasa Alcalina es muy baja (< 50), sospecha déficit grave de Zinc y Magnesio intracelular.
-                           - Si hay dislipidemia, evalúa SIEMPRE la función tiroidea (TSH/T3).
+                        INSTRUCCIÓN CRÍTICA (CHAIN-OF-THOUGHT EXPLICITO):
+                        ESTÁS OBLIGADO a escribir tu proceso de razonamiento paso a paso dentro de una caja HTML específica ANTES de dar el diagnóstico.
+                        En ese razonamiento debes:
+                        1. Calcular ratios (TyG, TG/HDL, AST/ALT, NLR, BUN/Creatinina).
+                        2. Aplicar rangos funcionales/longevidad (TSH < 2.0, Ferritina 50-150, Vitamina D > 50, TG < 70).
+                        3. Triangular datos (ej. relacionar VCM con metilación, o Ácido Úrico con resistencia a la insulina).
                         
                         ESTRUCTURA EXACTA DE TU RESPUESTA:
-                        A) "🚨 Biomarcadores Críticos y Ratios Calculados" (Muestra los ratios exactos y qué significan).
-                        B) "🔍 Hallazgos Subclínicos y Triangulación" (Conecta los puntos: ej. "Tu ácido úrico + tus triglicéridos indican...").
-                        C) "⏳ Estado Metabólico / Edad Biológica" (¿Está el paciente acelerando su envejecimiento celular?).
-                        
-                        (El plan de suplementación ponlo al final usando la caja asignada. DEBE SER PRECISO: Ej. Metilfolato no ácido fólico, Treonato o Bisglicinato de Magnesio, K2-MK7, etc.).
+                        1. PRIMERO: <div class="cot-box"><b>🧠 Razonamiento Clínico Interno:</b><br>[Escribe aquí tu análisis paso a paso, cálculos y deducciones crudas]</div>
+                        2. LUEGO, las cajas finales para el usuario (HALLAZGOS, ACCIÓN, EDAD BIOLÓGICA, SUPLEMENTACIÓN).
                         '''
                         html_extra = ""
                         
@@ -980,7 +962,8 @@ with col_center:
                     {instruccion_enfermeria}
                     {instruccion_nlp_riesgo}
                     
-                    FORMATO HTML REQUERIDO:
+                    FORMATO HTML REQUERIDO (Respeta este orden si es Analítica):
+                    [Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]
                     <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción]</div>
                     <div class="action-box"><b>⚡ ACCIÓN / RIESGO INMEDIATO:</b><br>[Explicación]</div>
                     <div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>
@@ -988,9 +971,10 @@ with col_center:
                     {html_extra}
                     """
 
-                    # Para evitar que use las cajas de longevidad si no es analítica, limpiamos el prompt dinámicamente:
+                    # Para evitar que use las cajas de CoT o longevidad si no es analítica, limpiamos el prompt dinámicamente:
                     if "Analítica" not in modo:
                          prompt = prompt.replace('<div class="longevity-box"><b>⏳ EDAD BIOLÓGICA / ESTADO METABÓLICO:</b><br>[Evaluación de senescencia/metabolismo]</div>', '')
+                         prompt = prompt.replace('[Si es analítica, inyectar <div class="cot-box"> primero como se instruyó]\n', '')
 
                     resp = model.generate_content([prompt, *con] if con else prompt)
                     texto_generado = resp.text
@@ -1042,7 +1026,6 @@ with col_center:
                     with st.chat_message("user"): st.markdown(p)
                     with st.chat_message("assistant"):
                         try:
-                            # AQUÍ TAMBIÉN ESTÁ FORZADA LA VERSIÓN PREVIEW
                             r = genai.GenerativeModel("gemini-3-flash-preview").generate_content(f"CTX:{st.session_state.resultado_analisis}\nQ:{p}")
                             st.markdown(r.text); st.session_state.chat_messages.append({"role": "assistant", "content": r.text})
                         except: st.error("Error chat")
