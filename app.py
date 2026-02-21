@@ -13,24 +13,12 @@ import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
 import uuid
-
-# --- PARCHE NUCLEAR BASE64 PARA LA PIZARRA ---
-# Forzamos a la pizarra a tragarse la imagen saltándonos la seguridad de Streamlit 1.40
-import streamlit_drawable_canvas
-def patched_image_to_url(image, *args, **kwargs):
-    import base64
-    from io import BytesIO
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
-streamlit_drawable_canvas.image_to_url = patched_image_to_url
-from streamlit_drawable_canvas import st_canvas
-# ----------------------------------------------
+import urllib.request
+import json
+import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 97.0 (Canvas Final)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 98.0", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -224,7 +212,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 97.0")
+st.title("🩺 LabMind 98.0 (Estable)")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -246,11 +234,11 @@ with col_center:
                  ["🩹 Heridas / Úlceras", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
     
-    archivos = []; con_final_dibujo = []
+    archivos = []
     audio_val = None 
     
     if modo == "📚 Agente Investigador (PubMed)":
-        st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU. Buscará literatura científica real y generará un informe citado.")
+        st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU.")
         query_pubmed = st.text_input("🔍 ¿Qué duda clínica quieres investigar en PubMed?", placeholder="Ej: Effectiveness of honey dressings for diabetic foot ulcers")
         notas = st.text_area("Contexto de tu paciente (opcional):", placeholder="Paciente de 70 años con DM2...")
     
@@ -260,42 +248,10 @@ with col_center:
             for f in fs:
                 if "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
+            
+        notas = st.text_area("Notas / Preguntas específicas:", height=70, placeholder="Describe qué quieres que la IA observe en las imágenes...")
         
-        # --- PIZARRA INTERACTIVA CON PARCHE BASE64 ---
-        imagen_dibujada = None
-        if archivos and any(t == "img" for t, _ in archivos):
-            img_file = next(f for t, f in archivos if t == "img")
-            img_file.seek(0) 
-            
-            img_pil_cruda = Image.open(img_file)
-            img_pil_original = ImageOps.exif_transpose(img_pil_cruda).convert("RGB")
-            
-            habilitar_dibujo = st.checkbox("✏️ Dibujar / Señalar en la foto para la IA")
-            if habilitar_dibujo:
-                st.caption("Usa el dedo para marcar la anomalía.")
-                
-                w_canvas = 350
-                h_canvas = int(w_canvas * img_pil_original.height / img_pil_original.width)
-                
-                img_fondo_canvas = img_pil_original.resize((w_canvas, h_canvas))
-                img_fondo_limpia = Image.fromarray(np.array(img_fondo_canvas).astype('uint8'), 'RGB')
-                
-                canvas_result = st_canvas(
-                    fill_color="rgba(255, 0, 0, 0.0)", 
-                    stroke_width=4, stroke_color="#00FF00", 
-                    background_image=img_fondo_limpia, 
-                    update_streamlit=True, height=h_canvas, width=w_canvas, 
-                    drawing_mode="freedraw", key="canvas"
-                )
-                
-                if canvas_result.image_data is not None and np.sum(canvas_result.image_data) > 0:
-                    mask = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
-                    mask = mask.resize(img_pil_original.size, resample=Image.NEAREST)
-                    imagen_dibujada = Image.alpha_composite(img_pil_original.convert('RGBA'), mask).convert('RGB')
-                    st.success("✅ Dibujo fusionado con éxito en alta resolución.")
-            
-        notas = st.text_area("Notas / Preguntas específicas:", height=70, placeholder="Ej: Analiza la zona que he rodeado en verde...")
-        
+        # --- AUDIO BLINDADO ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
             if hasattr(st, "audio_input"):
                 audio_val = st.audio_input("Dictar notas", key="mic", label_visibility="collapsed")
@@ -337,21 +293,16 @@ with col_center:
                             r = pypdf.PdfReader(file)
                             txt_docs += "".join([p.extract_text() for p in r.pages])
                         else:
-                            if imagen_dibujada is not None:
-                                con.append(imagen_dibujada)
-                                if not imagen_para_visor: imagen_para_visor = imagen_dibujada
-                                imagen_dibujada = None 
+                            file.seek(0)
+                            i_pil_cruda = Image.open(file)
+                            i_pil = ImageOps.exif_transpose(i_pil_cruda).convert("RGB")
+                            if "ECG" in modo:
+                                img_aislada = aislar_trazado_ecg(i_pil)
+                                con.extend([i_pil, img_aislada])
+                                if not imagen_para_visor: imagen_para_visor = i_pil
                             else:
-                                file.seek(0)
-                                i_pil_cruda = Image.open(file)
-                                i_pil = ImageOps.exif_transpose(i_pil_cruda).convert("RGB")
-                                if "ECG" in modo:
-                                    img_aislada = aislar_trazado_ecg(i_pil)
-                                    con.extend([i_pil, img_aislada])
-                                    if not imagen_para_visor: imagen_para_visor = i_pil
-                                else:
-                                    con.append(i_pil)
-                                    if not imagen_para_visor: imagen_para_visor = i_pil
+                                con.append(i_pil)
+                                if not imagen_para_visor: imagen_para_visor = i_pil
 
                 instruccion_bbox = ""
                 if "ECG" in modo:
@@ -366,16 +317,15 @@ with col_center:
                     instruccion_modo = 'Analiza el caso clínico proporcionado.'
 
                 prompt = f"""
-                Rol: Médico Especialista IA V97. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V98. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
                 INSTRUCCIONES CRÍTICAS:
                 1. MÁXIMA ESTRICTEZ: PROHIBIDO escribir texto gris o saludos fuera de las cajas HTML. Tu respuesta debe empezar directamente con la primera caja <div class="diagnosis-box">.
-                2. Si el usuario ha hecho un dibujo en la foto (en verde brillante), céntrate en responder qué hay dentro de ese dibujo o zona marcada.
-                3. {instruccion_modo}
-                4. {instruccion_bbox}
-                5. REGLA DE OMISIÓN: Si faltan datos de laboratorio o analíticas, NO menciones que faltan. Ignóralo.
+                2. {instruccion_modo}
+                3. {instruccion_bbox}
+                4. REGLA DE OMISIÓN: Si faltan datos de laboratorio o analíticas, NO menciones que faltan. Ignóralo.
 
                 FORMATO HTML REQUERIDO:
                 <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción clínica]</div>
@@ -407,7 +357,7 @@ with col_center:
 with col_right:
     with st.expander("👁️ Visor Visual / IA", expanded=True):
         if st.session_state.get("img_marcada"):
-            st.markdown("#### 🎯 Detección IA / Dibujo Usuario")
+            st.markdown("#### 🎯 Detección IA")
             st.image(st.session_state.img_marcada, use_container_width=True)
         else:
             st.caption("Aquí aparecerá la imagen procesada o el análisis del agente.")
