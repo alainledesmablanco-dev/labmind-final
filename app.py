@@ -202,7 +202,6 @@ with col_left:
 
     lista_para_mostrar = st.session_state.modelos_disponibles if st.session_state.modelos_disponibles else ["Inicia sesión..."]
     
-    # BÚSQUEDA DEL MODELO POR DEFECTO (Fijado estrictamente a Gemini 3 Flash Preview)
     idx_defecto = 0
     for i, modelo in enumerate(lista_para_mostrar):
         nombre_modelo = modelo.lower()
@@ -236,11 +235,9 @@ with col_center:
                 if "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        # --- NOTAS PLEGADAS ---
         with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed", placeholder="Describe qué quieres que la IA observe en las imágenes...")
         
-        # --- AUDIO BLINDADO ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
             if hasattr(st, "audio_input"):
                 audio_val = st.audio_input("Dictar notas", key="mic", label_visibility="collapsed")
@@ -251,10 +248,15 @@ with col_center:
     with col_btn1: btn_analizar = st.button("🚀 ANALIZAR / INVESTIGAR", type="primary", use_container_width=True)
     with col_btn2:
         if st.button("🔄 NUEVO", type="secondary", use_container_width=True):
-            st.session_state.resultado_analisis = None; st.session_state.img_marcada = None; st.rerun()
+            st.session_state.resultado_analisis = None
+            st.session_state.img_marcada = None
+            st.session_state.chat_messages = []  # Limpia el chat
+            st.rerun()
 
     if btn_analizar:
         st.session_state.resultado_analisis = None
+        st.session_state.chat_messages = [] # Limpia el historial para el nuevo caso
+        
         with st.spinner("🧠 Computando y consultando bases de datos..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
@@ -293,7 +295,6 @@ with col_center:
                                 con.append(i_pil)
                                 if not imagen_para_visor: imagen_para_visor = i_pil
 
-                # --- LÓGICA DE DIBUJO (BBOX) EXTENDIDA ---
                 instruccion_bbox = ""
                 if "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
@@ -302,7 +303,6 @@ with col_center:
                 elif modo in ["🧴 Dermatología", "💀 RX/TAC/Resonancia", "🩹 Heridas / Úlceras"]:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
                     instruccion_modo = 'Analiza el caso clínico y la imagen proporcionada.'
-                    # Ahora tiene orden expresa de dibujar en Dermatología y RX
                     instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas una lesión (ej. carcinoma, úlcera), fractura, o patología focal en la imagen, ES VITAL que devuelvas exactamente esta etiqueta indicando sus coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Lesión. Escala de 0 a 1000."
                 elif modo == "📚 Agente Investigador (PubMed)":
                     titulo_caja = "📚 CONCLUSIÓN BASADA EN EVIDENCIA"
@@ -311,7 +311,6 @@ with col_center:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
                     instruccion_modo = 'Analiza el caso clínico proporcionado.'
 
-                # --- LÓGICA DE CUIDADOS DE ENFERMERÍA DINÁMICA ---
                 instruccion_enfermeria = ""
                 caja_enfermeria = ""
                 if contexto in ["Hospitalización", "Urgencias", "UCI"]:
@@ -319,7 +318,7 @@ with col_center:
                     caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</p></details>'
 
                 prompt = f"""
-                Rol: Médico Especialista IA. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V101. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
@@ -340,7 +339,6 @@ with col_center:
                 resp = model.generate_content([prompt, *con] if con else prompt)
                 texto_generado = resp.text
 
-                # Filtro guillotina para el nuevo formato details
                 if "<details" in texto_generado:
                     texto_generado = texto_generado[texto_generado.find("<details"):]
 
@@ -354,13 +352,41 @@ with col_center:
 
             except Exception as e: st.error(f"Error: {e}")
 
+    # --- RENDERIZADO DEL INFORME Y EL CHAT FLOTANTE ---
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
+        
         if st.session_state.pdf_bytes:
             st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf")
+            
+        st.markdown("---")
+        st.markdown("### 💬 Discusión del Caso")
+        st.caption("Interactúa en vivo con la IA sobre este diagnóstico. ¿Dudas sobre dosis o tratamientos?")
+
+        # Mostrar historial del chat
+        for msg in st.session_state.chat_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Input flotante del chat (se ancla automáticamente a la parte inferior del contenedor)
+        if user_query := st.chat_input("Escribe tu pregunta clínica aquí..."):
+            st.session_state.chat_messages.append({"role": "user", "content": user_query})
+            with st.chat_message("user"):
+                st.markdown(user_query)
+            
+            with st.chat_message("assistant"):
+                try:
+                    chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
+                    # Forzamos a la IA a recordar el informe que acaba de generar
+                    ctx_chat = f"Eres el médico experto de guardia. Has generado el siguiente informe previo:\n{st.session_state.resultado_analisis}\n\nResponde de forma clínica y directa a la siguiente pregunta del compañero:\n{user_query}"
+                    
+                    respuesta_ia = chat_model.generate_content(ctx_chat)
+                    st.markdown(respuesta_ia.text)
+                    st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
+                except Exception as e:
+                    st.error(f"Error en la conexión del chat: {e}")
 
 with col_right:
-    # --- APERTURA INTELIGENTE DEL VISOR ---
     visor_abierto = True if st.session_state.get("img_marcada") else False
     
     with st.expander("👁️ Visor Visual / IA", expanded=visor_abierto):
