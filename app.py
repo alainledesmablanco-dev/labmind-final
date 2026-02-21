@@ -77,32 +77,26 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      CONFIGURACIÓN DE SEGURIDAD MÉDICA
+#      MOTOR POCUS GOD MODE V6 (SINGULARIDAD)
 # ==========================================
-# Esto apaga los filtros de Google para que no censure radiografías ni heridas
-MEDICAL_SAFETY_SETTINGS = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-]
 
-# ==========================================
-#      MOTOR POCUS GOD MODE V6
-# ==========================================
 def procesar_pocus_v6_singularidad(video_path):
+    """Límite matemático: Speckle Tracking (Lucas-Kanade), Índice VCI, Termografía M-Mode"""
     try:
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0 or np.isnan(fps): fps = 30.0
+
         ret, frame1 = cap.read()
         if not ret: return None, None, None, {}
 
+        # 1. OPTIMIZACIÓN ESPACIAL EXTREMA
         h_orig, w_orig = frame1.shape[:2]
         scale = 320.0 / w_orig 
         new_w, new_h = 320, int(h_orig * scale)
         frame1 = cv2.resize(frame1, (new_w, new_h))
 
+        # 2. AUTO-CROP & MÁSCARAS
         gray_init = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
         _, beam_thresh = cv2.threshold(gray_init, 15, 255, cv2.THRESH_BINARY)
         beam_contours, _ = cv2.findContours(beam_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -113,6 +107,7 @@ def procesar_pocus_v6_singularidad(video_path):
         else:
             cv2.ellipse(roi_mask, (new_w//2, new_h//2), (int(new_w*0.4), int(new_h*0.4)), 0, 0, 360, 255, -1)
 
+        # 3. SPECKLE TRACKING INIT
         tissue_mask = cv2.bitwise_and(gray_init, gray_init, mask=roi_mask)
         _, tissue_only = cv2.threshold(tissue_mask, 50, 255, cv2.THRESH_BINARY)
         p0 = cv2.goodFeaturesToTrack(gray_init, maxCorners=50, qualityLevel=0.1, minDistance=10, mask=tissue_only)
@@ -136,6 +131,7 @@ def procesar_pocus_v6_singularidad(video_path):
         while True:
             ret, frame2 = cap.read()
             if not ret: break
+            
             frame_count += 1
             skip_rate = max(1, int(fps // 15))
             if frame_count % skip_rate != 0: continue
@@ -175,8 +171,10 @@ def procesar_pocus_v6_singularidad(video_path):
                 x, y, w_bb, h_bb = cv2.boundingRect(best_c)
                 dynamic_x = x + (w_bb // 2)
                 vessel_widths.append(w_bb)
+                
                 vol_proxy = (max_area ** 2) / float(h_bb) if h_bb > 0 else 0
                 volumes_simpson.append(vol_proxy)
+
                 if vol_proxy >= max(volumes_simpson):
                     best_endo_frame = frame2.copy()
                     cv2.drawContours(best_endo_frame, [best_c], -1, (0, 255, 100), 2)
@@ -198,8 +196,10 @@ def procesar_pocus_v6_singularidad(video_path):
             _, thresh_b = cv2.threshold(np.absolute(sobelx), 160, 255, cv2.THRESH_BINARY)
             if cv2.countNonZero(thresh_b) > (new_w * new_h * 0.015):
                 b_lines_score += 1
+
         cap.release()
 
+        # 4. MÉTRICAS FINALES
         metrics = {}
         frames_procesados = frame_count // skip_rate if skip_rate > 0 else 1
         
@@ -208,6 +208,7 @@ def procesar_pocus_v6_singularidad(video_path):
             smoothed_vols = np.convolve(vols, np.ones(3)/3, mode='valid')
             edv, esv = np.percentile(smoothed_vols, 95), np.percentile(smoothed_vols, 5)
             metrics['FEVI'] = round(max(10.0, min(((edv - esv) / edv) * 100 if edv > 0 else 0, 85.0)), 1) 
+            
             crossings = np.where(np.diff(np.sign(smoothed_vols - np.mean(smoothed_vols))) > 0)[0]
             if len(crossings) > 1:
                 intervals = np.diff(crossings) * skip_rate
@@ -230,6 +231,7 @@ def procesar_pocus_v6_singularidad(video_path):
             _, m_thresh = cv2.threshold(m_mode_img, 200, 255, cv2.THRESH_BINARY)
             y_coords = np.where(m_thresh > 0)[0]
             metrics['TAPSE_Proxy'] = round((np.percentile(y_coords, 95) - np.percentile(y_coords, 5)) * (150.0 / new_h), 1) if len(y_coords) > 0 else "N/A"
+                
             m_mode_img = cv2.resize(m_mode_img, (new_w, new_h))
             m_mode_color = cv2.applyColorMap(np.uint8(m_mode_img), cv2.COLORMAP_OCEAN) 
             m_mode_pil = Image.fromarray(cv2.cvtColor(m_mode_color, cv2.COLOR_BGR2RGB))
@@ -244,6 +246,7 @@ def procesar_pocus_v6_singularidad(video_path):
             
         return m_mode_pil, endo_pil, doppler_pil, metrics
     except Exception as e:
+        print(f"Error God Mode V6: {e}")
         return None, None, None, {}
 
 # ==========================================
@@ -346,10 +349,13 @@ with col_left:
             break
 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", lista_para_mostrar, index=idx_defecto)
+    
+    # --- MENÚ ZONA ANATÓMICA RESTAURADO (AUTODETECT POR DEFECTO) ---
     st.session_state.punto_cuerpo = st.selectbox("Zona anatómica:", ["✨ Autodetectar", "Cara", "Pecho", "Abdomen", "Sacro/Glúteo", "Pierna", "Talón", "Pie", "No aplicable"])
 
 with col_center:
     st.subheader("1. Selección de Modo")
+    # --- MENÚ ESPECIALIDAD CON AUTODETECT POR DEFECTO ---
     modo = st.selectbox("Especialidad:", 
                  ["✨ Autodetectar", "🩹 Heridas / Úlceras", "🦇 Ecografía / POCUS (God Mode)", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
@@ -369,7 +375,7 @@ with col_center:
                 elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
+        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed")
         
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
@@ -418,6 +424,8 @@ with col_center:
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf_video:
                                 tf_video.write(st.session_state.video_bytes)
                             
+                            # --- LÓGICA AUTOPILOT POCUS ---
+                            # Se activa si el usuario elige "POCUS" manualmente, O si sube un vídeo y está en "Autodetectar"
                             if "POCUS" in modo or modo == "✨ Autodetectar":
                                 st.toast("🧮 Vídeo detectado: Activando God Mode Ultrasonido...")
                                 m_mode, endo_map, doppler_map, p_metrics = procesar_pocus_v6_singularidad(tf_video.name)
@@ -427,7 +435,7 @@ with col_center:
                                 if p_metrics:
                                     txt_docs += f"\n[TELEMETRÍA POCUS V6]\n- FEVI Estimada (Vol): {p_metrics.get('FEVI', 'N/A')}%\n- FC: {p_metrics.get('BPM', 'N/A')} lpm\n- Ritmo: {p_metrics.get('Ritmo', 'N/A')}\n- Strain Tisular Proxy: {p_metrics.get('Strain_Proxy', 'N/A')}\n- Colapso VCI Proxy: {p_metrics.get('Colapso_VCI', 'N/A')}%\n- Líneas B Pleurales: {'Positivo' if p_metrics.get('B_Lines') else 'Negativo'}\n- Doppler Activo: {'Sí' if p_metrics.get('Doppler') else 'No'}\n- Derrame Pericárdico Sugerido: {'Sí' if p_metrics.get('Derrame') else 'No'}\n"
                                 
-                            st.toast("🎥 Subiendo archivo a Gemini Vision...")
+                            st.toast("🎥 Subiendo archivo de vídeo a Gemini Vision...")
                             v_file = genai.upload_file(path=tf_video.name)
                             while v_file.state.name == "PROCESSING":
                                 time.sleep(2); v_file = genai.get_file(v_file.name)
@@ -436,6 +444,7 @@ with col_center:
                         else: 
                             file.seek(0)
                             i_pil = ImageOps.exif_transpose(Image.open(file)).convert("RGB")
+                            # Si es modo Autodetectar, NO aplicamos el filtro destructivo de ECG por si es una herida.
                             if "ECG" in modo:
                                 img_aislada = aislar_trazado_ecg(i_pil)
                                 con.extend([i_pil, img_aislada])
@@ -444,11 +453,12 @@ with col_center:
                             
                             if not imagen_para_visor: imagen_para_visor = i_pil
 
-                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA DE VISIÓN ESPACIAL: Si detectas patología, lesión o anomalía en la imagen, DEBES imprimir obligatoriamente sus coordenadas usando una escala matemática de 0 a 1000. Usa EXACTAMENTE este formato literal: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto. (Ejemplo que debes imitar: BBOX: [150, 200, 450, 600] LABEL: Fractura falange)."
+                # --- REGLAS DE AUTOPILOT (V111) ---
+                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas lesión/fractura/isquemia/anomalía indica coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre."
                 
                 if modo == "✨ Autodetectar":
                     titulo_caja = "🛠️ DIAGNÓSTICO Y PLAN DE ACCIÓN"
-                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta.'
+                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, Analítica, Ecografía, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta y analiza la imagen con máxima profundidad clínica.'
                 elif "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
@@ -462,6 +472,7 @@ with col_center:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
                     instruccion_modo = 'Analiza el caso.'
 
+                # --- REGLA DE ZONA ANATÓMICA ---
                 if st.session_state.punto_cuerpo == "✨ Autodetectar":
                     instruccion_anatomia = "Deduce visualmente la zona anatómica o el encuadre de la imagen e indícalo en tu análisis."
                 else:
@@ -470,7 +481,7 @@ with col_center:
                 caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Cuidados específicos]</p></details>' if contexto in ["Hospitalización", "Urgencias", "UCI"] else ""
 
                 prompt = f"""
-                Rol: Médico IA Avanzado. Contexto: {contexto}. Modo Seleccionado: {modo}.
+                Rol: Médico IA Avanzado (Autopilot). Contexto: {contexto}. Modo Seleccionado: {modo}.
                 Usuario: "{notas}"
                 Docs/Datos: {txt_docs[:10000]}
                 
@@ -479,7 +490,7 @@ with col_center:
                 2. {instruccion_modo}
                 3. {instruccion_anatomia}
                 4. {instruccion_bbox}
-                5. Omite datos faltantes (no digas que faltan datos, analiza lo que tienes).
+                5. Omite datos faltantes (no digas que faltan datos, simplemente analiza lo que tienes).
                 6. DIAGNÓSTICO EN NEGRITA: En la primera frase usa <b>...</b>.
 
                 FORMATO HTML REQUERIDO:
@@ -487,13 +498,8 @@ with col_center:
                 <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Explicación de manejo clínico]</p></details>
                 <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>{titulo_caja}</summary><p>[Desarrollo o Bibliografía]</p></details>{caja_enfermeria}
                 """
-                
-                # --- AQUÍ APAGAMOS LOS FILTROS DE SEGURIDAD DE GOOGLE ---
-                resp = model.generate_content(
-                    [prompt, *con] if con else prompt,
-                    safety_settings=MEDICAL_SAFETY_SETTINGS
-                )
-                
+
+                resp = model.generate_content([prompt, *con] if con else prompt)
                 texto_generado = resp.text[resp.text.find("<details"):] if "<details" in resp.text else resp.text
 
                 if imagen_para_visor:
@@ -503,9 +509,7 @@ with col_center:
                 st.session_state.resultado_analisis = texto_generado.strip()
                 st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
-            except Exception as e: 
-                # Este es el bloque que lanzaba el error rojo en tu pantalla
-                st.error(f"Error procesando el análisis: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
@@ -523,18 +527,24 @@ with col_right:
         metrics = st.session_state.get("pocus_metrics", {})
         if metrics:
             st.markdown("### 🧮 Telemetría POCUS (V6)")
+            
             c1, c2, c3 = st.columns(3)
             c1.metric("FEVI", f"{metrics.get('FEVI', 'N/A')}%")
             c2.metric("FC", f"{metrics.get('BPM', 'N/A')} bpm")
             c3.metric("Ritmo", metrics.get('Ritmo', 'N/A'))
+            
             st.divider()
+            
             c4, c5 = st.columns(2)
             c4.metric("Strain T. (Proxy)", f"{metrics.get('Strain_Proxy', 'N/A')}")
             c5.metric("Colapso VCI (Proxy)", f"{metrics.get('Colapso_VCI', 'N/A')}%")
+            
             st.divider()
+            
             c6, c7 = st.columns(2)
             c6.metric("Líneas B", "⚠️ Detectadas" if metrics.get('B_Lines') else "✅ Negativo")
             c7.metric("Derrame", "⚠️ Sí" if metrics.get('Derrame') else "✅ No")
+            
             st.divider()
 
         if st.session_state.get("video_bytes"): st.video(st.session_state.video_bytes)
@@ -555,14 +565,6 @@ if st.session_state.resultado_analisis:
             genai.configure(api_key=st.session_state.api_key)
             chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
             ctx_chat = f"Eres el médico experto de guardia. Has generado este informe:\n{st.session_state.resultado_analisis}\nResponde a la duda:\n{user_query}"
-            
-            # --- APAGAMOS FILTROS TAMBIÉN EN EL CHAT ---
-            respuesta_ia = chat_model.generate_content(
-                ctx_chat, 
-                safety_settings=MEDICAL_SAFETY_SETTINGS
-            )
-            st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
-            
-        except Exception as e: 
-            st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error bloqueado por seguridad: {e}"})
+            st.session_state.chat_messages.append({"role": "assistant", "content": chat_model.generate_content(ctx_chat).text})
+        except Exception as e: st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error: {e}"})
         st.rerun()
