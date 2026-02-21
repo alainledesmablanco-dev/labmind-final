@@ -16,6 +16,12 @@ import urllib.request
 import json
 import xml.etree.ElementTree as ET
 
+# --- NUEVO: IMPORTAR MOBILE SAM ---
+try:
+    from ultralytics import SAM
+except ImportError:
+    SAM = None
+
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
 
@@ -284,7 +290,7 @@ def aislar_trazado_ecg(pil_image):
         return Image.fromarray(cv2.cvtColor(smooth, cv2.COLOR_GRAY2RGB))
     except: return pil_image
 
-def extraer_y_dibujar_bboxes(texto, img_pil=None):
+def extraer_y_dibujar_bboxes(texto, img_pil=None, aplicar_sam=False):
     patron = r'BBOX:\s*\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]\s*LABEL:\s*([^\n<]+)'
     matches = re.findall(patron, texto)
     if not matches or img_pil is None: return None, texto, False
@@ -292,18 +298,45 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None):
     img_cv = cv2.cvtColor(np.array(img_pil.convert('RGB')), cv2.COLOR_RGB2BGR)
     h, w = img_cv.shape[:2]
     
+    sam_model = None
+    if aplicar_sam and SAM is not None:
+        try:
+            sam_model = SAM('mobile_sam.pt') 
+        except Exception as e:
+            print(f"Error cargando MobileSAM: {e}")
+    
     for match in matches:
         ymin, xmin, ymax, xmax, label = match
         try:
             x1, y1 = max(0, int(int(xmin) * w / 1000)), max(0, int(int(ymin) * h / 1000))
             x2, y2 = min(w, int(int(xmax) * w / 1000)), min(h, int(int(ymax) * h / 1000))
-            cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 4) 
+            
             texto_label = label.strip().upper()
+            
+            if sam_model:
+                results = sam_model.predict(img_cv, bboxes=[x1, y1, x2, y2], verbose=False)
+                for result in results:
+                    if result.masks is not None:
+                        mask = result.masks.data[0].cpu().numpy()
+                        mask_resized = cv2.resize(mask, (w, h))
+                        
+                        colored_mask = np.zeros_like(img_cv)
+                        colored_mask[mask_resized > 0] = [100, 100, 255] 
+                        
+                        area_px = np.sum(mask_resized > 0)
+                        porcentaje_area = round((area_px / (w * h)) * 100, 1)
+                        texto_label += f" | Area: {porcentaje_area}% de la img"
+                        
+                        img_cv = cv2.addWeighted(img_cv, 1.0, colored_mask, 0.4, 0)
+            
+            cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 4) 
+            
             escala = max(0.6, w/1000); grosor = max(2, int(w/500))
             (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala, grosor)
             cv2.rectangle(img_cv, (x1, max(0, y1-h_txt-10)), (x1 + w_txt, max(0, y1)), (0,0,0), -1)
             cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala, (255, 255, 255), grosor, cv2.LINE_AA)
-        except: pass
+        except Exception as e: 
+            print(f"Error procesando bounding box: {e}")
 
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), re.sub(patron, '', texto).strip(), True
 
@@ -350,12 +383,10 @@ with col_left:
 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", lista_para_mostrar, index=idx_defecto)
     
-    # --- MENÚ ZONA ANATÓMICA RESTAURADO (AUTODETECT POR DEFECTO) ---
     st.session_state.punto_cuerpo = st.selectbox("Zona anatómica:", ["✨ Autodetectar", "Cara", "Pecho", "Abdomen", "Sacro/Glúteo", "Pierna", "Talón", "Pie", "No aplicable"])
 
 with col_center:
     st.subheader("1. Selección de Modo")
-    # --- MENÚ ESPECIALIDAD CON AUTODETECT POR DEFECTO ---
     modo = st.selectbox("Especialidad:", 
                  ["✨ Autodetectar", "🩹 Heridas / Úlceras", "🦇 Ecografía / POCUS (God Mode)", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
@@ -424,8 +455,6 @@ with col_center:
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf_video:
                                 tf_video.write(st.session_state.video_bytes)
                             
-                            # --- LÓGICA AUTOPILOT POCUS ---
-                            # Se activa si el usuario elige "POCUS" manualmente, O si sube un vídeo y está en "Autodetectar"
                             if "POCUS" in modo or modo == "✨ Autodetectar":
                                 st.toast("🧮 Vídeo detectado: Activando God Mode Ultrasonido...")
                                 m_mode, endo_map, doppler_map, p_metrics = procesar_pocus_v6_singularidad(tf_video.name)
@@ -444,7 +473,6 @@ with col_center:
                         else: 
                             file.seek(0)
                             i_pil = ImageOps.exif_transpose(Image.open(file)).convert("RGB")
-                            # Si es modo Autodetectar, NO aplicamos el filtro destructivo de ECG por si es una herida.
                             if "ECG" in modo:
                                 img_aislada = aislar_trazado_ecg(i_pil)
                                 con.extend([i_pil, img_aislada])
@@ -454,29 +482,29 @@ with col_center:
                             if not imagen_para_visor: imagen_para_visor = i_pil
 
                 # --- REGLAS DE AUTOPILOT (V111) ---
-                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas lesión/fractura/isquemia/anomalía indica coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre."
+                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas lesión/herida/úlcera/dermatitis/fractura/isquemia/anomalía indica coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre. Las coordenadas deben ir de 0 a 1000."
                 
                 if modo == "✨ Autodetectar":
                     titulo_caja = "🛠️ DIAGNÓSTICO Y PLAN DE ACCIÓN"
-                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, Analítica, Ecografía, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta y analiza la imagen con máxima profundidad clínica.'
+                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (Herida, Dermatología, ECG, Radiografía, etc.). Autodetecta la especialidad y asume el rol de ese médico hiper-especialista.'
                 elif "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
                 elif "POCUS" in modo:
                     titulo_caja = "🦇 ANÁLISIS POCUS AVANZADO"
                     instruccion_modo = 'ERES UN EXPERTO EN ECOGRAFÍA CLÍNICA. Analiza el vídeo y los resultados matemáticos extremos.'
-                elif modo in ["🧴 Dermatología", "💀 RX/TAC/Resonancia", "🩹 Heridas / Úlceras"]:
-                    titulo_caja = "🛠️ PLAN DE ACCIÓN"
-                    instruccion_modo = 'Analiza el caso clínico y la imagen.'
+                elif modo in ["🧴 Dermatología", "🩹 Heridas / Úlceras"]:
+                    titulo_caja = "🔬 ANÁLISIS DERMATOLÓGICO / TISULAR"
+                    instruccion_modo = 'ERES UN EXPERTO EN TEJIDOS. Analiza el lecho de la herida, bordes, exudado, o la morfología de la lesión dermatológica.'
                 else:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
-                    instruccion_modo = 'Analiza el caso.'
+                    instruccion_modo = 'Analiza el caso clínico y la imagen.'
 
                 # --- REGLA DE ZONA ANATÓMICA ---
                 if st.session_state.punto_cuerpo == "✨ Autodetectar":
-                    instruccion_anatomia = "Deduce visualmente la zona anatómica o el encuadre de la imagen e indícalo en tu análisis."
+                    instruccion_anatomia = "Deduce visualmente la zona anatómica o el encuadre de la imagen e indícalo explícitamente en tu primera línea de análisis."
                 else:
-                    instruccion_anatomia = f"ATENCIÓN: El usuario ha especificado manualmente que la zona anatómica es: {st.session_state.punto_cuerpo}. OBRIGA ESTA INDICACIÓN Y BASA TU ANÁLISIS EN ELLO."
+                    instruccion_anatomia = f"ATENCIÓN: El usuario ha especificado manualmente que la zona anatómica es: {st.session_state.punto_cuerpo}. OBLIGA ESTA INDICACIÓN Y BASA TU ANÁLISIS EN ELLO."
 
                 caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Cuidados específicos]</p></details>' if contexto in ["Hospitalización", "Urgencias", "UCI"] else ""
 
@@ -503,7 +531,8 @@ with col_center:
                 texto_generado = resp.text[resp.text.find("<details"):] if "<details" in resp.text else resp.text
 
                 if imagen_para_visor:
-                    img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_para_visor)
+                    activar_sam = modo in ["✨ Autodetectar", "🩹 Heridas / Úlceras", "🧴 Dermatología"]
+                    img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_para_visor, activar_sam)
                     st.session_state.img_marcada = img_marcada if detectado else imagen_para_visor
 
                 st.session_state.resultado_analisis = texto_generado.strip()
