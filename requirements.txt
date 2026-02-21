@@ -9,5 +9,7 @@ pandas
 extra-streamlit-components
 ultralytics
 streamlit-drawable-canvas==0.9.3
+# forzar reinstalacion
+
 
 
