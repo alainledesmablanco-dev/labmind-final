@@ -77,26 +77,22 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      MOTOR POCUS GOD MODE V6 (SINGULARIDAD)
+#      MOTOR POCUS GOD MODE V6
 # ==========================================
 
 def procesar_pocus_v6_singularidad(video_path):
-    """Límite matemático: Speckle Tracking (Lucas-Kanade), Índice VCI, Termografía M-Mode"""
     try:
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps == 0 or np.isnan(fps): fps = 30.0
-
         ret, frame1 = cap.read()
         if not ret: return None, None, None, {}
 
-        # 1. OPTIMIZACIÓN ESPACIAL EXTREMA
         h_orig, w_orig = frame1.shape[:2]
         scale = 320.0 / w_orig 
         new_w, new_h = 320, int(h_orig * scale)
         frame1 = cv2.resize(frame1, (new_w, new_h))
 
-        # 2. AUTO-CROP & MÁSCARAS
         gray_init = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
         _, beam_thresh = cv2.threshold(gray_init, 15, 255, cv2.THRESH_BINARY)
         beam_contours, _ = cv2.findContours(beam_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -107,7 +103,6 @@ def procesar_pocus_v6_singularidad(video_path):
         else:
             cv2.ellipse(roi_mask, (new_w//2, new_h//2), (int(new_w*0.4), int(new_h*0.4)), 0, 0, 360, 255, -1)
 
-        # 3. SPECKLE TRACKING INIT
         tissue_mask = cv2.bitwise_and(gray_init, gray_init, mask=roi_mask)
         _, tissue_only = cv2.threshold(tissue_mask, 50, 255, cv2.THRESH_BINARY)
         p0 = cv2.goodFeaturesToTrack(gray_init, maxCorners=50, qualityLevel=0.1, minDistance=10, mask=tissue_only)
@@ -199,7 +194,6 @@ def procesar_pocus_v6_singularidad(video_path):
 
         cap.release()
 
-        # 4. MÉTRICAS FINALES
         metrics = {}
         frames_procesados = frame_count // skip_rate if skip_rate > 0 else 1
         
@@ -246,7 +240,6 @@ def procesar_pocus_v6_singularidad(video_path):
             
         return m_mode_pil, endo_pil, doppler_pil, metrics
     except Exception as e:
-        print(f"Error God Mode V6: {e}")
         return None, None, None, {}
 
 # ==========================================
@@ -349,13 +342,10 @@ with col_left:
             break
 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", lista_para_mostrar, index=idx_defecto)
-    
-    # --- MENÚ ZONA ANATÓMICA RESTAURADO (AUTODETECT POR DEFECTO) ---
     st.session_state.punto_cuerpo = st.selectbox("Zona anatómica:", ["✨ Autodetectar", "Cara", "Pecho", "Abdomen", "Sacro/Glúteo", "Pierna", "Talón", "Pie", "No aplicable"])
 
 with col_center:
     st.subheader("1. Selección de Modo")
-    # --- MENÚ ESPECIALIDAD CON AUTODETECT POR DEFECTO ---
     modo = st.selectbox("Especialidad:", 
                  ["✨ Autodetectar", "🩹 Heridas / Úlceras", "🦇 Ecografía / POCUS (God Mode)", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
@@ -375,7 +365,7 @@ with col_center:
                 elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
+        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed")
         
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
@@ -424,8 +414,6 @@ with col_center:
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf_video:
                                 tf_video.write(st.session_state.video_bytes)
                             
-                            # --- LÓGICA AUTOPILOT POCUS ---
-                            # Se activa si el usuario elige "POCUS" manualmente, O si sube un vídeo y está en "Autodetectar"
                             if "POCUS" in modo or modo == "✨ Autodetectar":
                                 st.toast("🧮 Vídeo detectado: Activando God Mode Ultrasonido...")
                                 m_mode, endo_map, doppler_map, p_metrics = procesar_pocus_v6_singularidad(tf_video.name)
@@ -435,7 +423,7 @@ with col_center:
                                 if p_metrics:
                                     txt_docs += f"\n[TELEMETRÍA POCUS V6]\n- FEVI Estimada (Vol): {p_metrics.get('FEVI', 'N/A')}%\n- FC: {p_metrics.get('BPM', 'N/A')} lpm\n- Ritmo: {p_metrics.get('Ritmo', 'N/A')}\n- Strain Tisular Proxy: {p_metrics.get('Strain_Proxy', 'N/A')}\n- Colapso VCI Proxy: {p_metrics.get('Colapso_VCI', 'N/A')}%\n- Líneas B Pleurales: {'Positivo' if p_metrics.get('B_Lines') else 'Negativo'}\n- Doppler Activo: {'Sí' if p_metrics.get('Doppler') else 'No'}\n- Derrame Pericárdico Sugerido: {'Sí' if p_metrics.get('Derrame') else 'No'}\n"
                                 
-                            st.toast("🎥 Subiendo archivo de vídeo a Gemini Vision...")
+                            st.toast("🎥 Subiendo archivo a Gemini Vision...")
                             v_file = genai.upload_file(path=tf_video.name)
                             while v_file.state.name == "PROCESSING":
                                 time.sleep(2); v_file = genai.get_file(v_file.name)
@@ -444,21 +432,19 @@ with col_center:
                         else: 
                             file.seek(0)
                             i_pil = ImageOps.exif_transpose(Image.open(file)).convert("RGB")
-                            # Si es modo Autodetectar, NO aplicamos el filtro destructivo de ECG por si es una herida.
                             if "ECG" in modo:
                                 img_aislada = aislar_trazado_ecg(i_pil)
                                 con.extend([i_pil, img_aislada])
                             else: 
                                 con.append(i_pil)
-                            
                             if not imagen_para_visor: imagen_para_visor = i_pil
 
-                # --- REGLAS DE AUTOPILOT (V111) ---
-                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas lesión/fractura/isquemia/anomalía indica coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre."
+                # --- NUEVA INSTRUCCIÓN DE RADAR BLINDADA (V113) ---
+                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA DE VISIÓN ESPACIAL: Si detectas patología, lesión o anomalía en la imagen, DEBES imprimir obligatoriamente sus coordenadas usando una escala matemática de 0 a 1000. Usa EXACTAMENTE este formato literal: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto. (Ejemplo que debes imitar: BBOX: [150, 200, 450, 600] LABEL: Fractura falange)."
                 
                 if modo == "✨ Autodetectar":
                     titulo_caja = "🛠️ DIAGNÓSTICO Y PLAN DE ACCIÓN"
-                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, Analítica, Ecografía, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta y analiza la imagen con máxima profundidad clínica.'
+                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta.'
                 elif "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
@@ -472,7 +458,6 @@ with col_center:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
                     instruccion_modo = 'Analiza el caso.'
 
-                # --- REGLA DE ZONA ANATÓMICA ---
                 if st.session_state.punto_cuerpo == "✨ Autodetectar":
                     instruccion_anatomia = "Deduce visualmente la zona anatómica o el encuadre de la imagen e indícalo en tu análisis."
                 else:
@@ -481,7 +466,7 @@ with col_center:
                 caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Cuidados específicos]</p></details>' if contexto in ["Hospitalización", "Urgencias", "UCI"] else ""
 
                 prompt = f"""
-                Rol: Médico IA Avanzado (Autopilot). Contexto: {contexto}. Modo Seleccionado: {modo}.
+                Rol: Médico IA Avanzado. Contexto: {contexto}. Modo Seleccionado: {modo}.
                 Usuario: "{notas}"
                 Docs/Datos: {txt_docs[:10000]}
                 
@@ -490,7 +475,7 @@ with col_center:
                 2. {instruccion_modo}
                 3. {instruccion_anatomia}
                 4. {instruccion_bbox}
-                5. Omite datos faltantes (no digas que faltan datos, simplemente analiza lo que tienes).
+                5. Omite datos faltantes (no digas que faltan datos, analiza lo que tienes).
                 6. DIAGNÓSTICO EN NEGRITA: En la primera frase usa <b>...</b>.
 
                 FORMATO HTML REQUERIDO:
@@ -527,24 +512,18 @@ with col_right:
         metrics = st.session_state.get("pocus_metrics", {})
         if metrics:
             st.markdown("### 🧮 Telemetría POCUS (V6)")
-            
             c1, c2, c3 = st.columns(3)
             c1.metric("FEVI", f"{metrics.get('FEVI', 'N/A')}%")
             c2.metric("FC", f"{metrics.get('BPM', 'N/A')} bpm")
             c3.metric("Ritmo", metrics.get('Ritmo', 'N/A'))
-            
             st.divider()
-            
             c4, c5 = st.columns(2)
             c4.metric("Strain T. (Proxy)", f"{metrics.get('Strain_Proxy', 'N/A')}")
             c5.metric("Colapso VCI (Proxy)", f"{metrics.get('Colapso_VCI', 'N/A')}%")
-            
             st.divider()
-            
             c6, c7 = st.columns(2)
             c6.metric("Líneas B", "⚠️ Detectadas" if metrics.get('B_Lines') else "✅ Negativo")
             c7.metric("Derrame", "⚠️ Sí" if metrics.get('Derrame') else "✅ No")
-            
             st.divider()
 
         if st.session_state.get("video_bytes"): st.video(st.session_state.video_bytes)
