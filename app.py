@@ -19,7 +19,7 @@ import json
 import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 95.2 (Estable)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 95.3", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -213,7 +213,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 95.2")
+st.title("🩺 LabMind 95.3")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -239,8 +239,9 @@ with col_center:
     audio_val = None 
     
     if modo == "📚 Agente Investigador (PubMed)":
-        st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU.")
+        st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU. Buscará literatura científica real y generará un informe citado.")
         query_pubmed = st.text_input("🔍 ¿Qué duda clínica quieres investigar en PubMed?", placeholder="Ej: Effectiveness of honey dressings for diabetic foot ulcers")
+        # El height ha sido borrado para que Streamlit use el tamaño por defecto correcto
         notas = st.text_area("Contexto de tu paciente (opcional):", placeholder="Paciente de 70 años con DM2...")
     
     else:
@@ -256,6 +257,7 @@ with col_center:
             img_file = next(f for t, f in archivos if t == "img")
             img_file.seek(0) 
             
+            # Cargar y corregir la rotación (fundamental para iPhone)
             img_pil_cruda = Image.open(img_file)
             img_pil_original = ImageOps.exif_transpose(img_pil_cruda).convert("RGB")
             
@@ -263,14 +265,13 @@ with col_center:
             if habilitar_dibujo:
                 st.caption("Usa el dedo para marcar la anomalía.")
                 
-                # Forzar el renderizado en un array estricto de colores para evitar fondos blancos
+                # Ancho adaptado al iPhone mini
                 w_canvas = 350
                 h_canvas = int(w_canvas * img_pil_original.height / img_pil_original.width)
-                img_fondo_canvas = img_pil_original.resize((w_canvas, h_canvas))
                 
-                # Conversión absoluta RGB Numpy para obligar a Streamlit a pintar el fondo
-                np_image = np.array(img_fondo_canvas)
-                img_fondo_limpia = Image.fromarray(np_image, 'RGB')
+                # FIX FONDO BLANCO: Conversión estricta a Numpy Array RGB
+                img_fondo_canvas = img_pil_original.resize((w_canvas, h_canvas))
+                img_fondo_limpia = Image.fromarray(np.array(img_fondo_canvas).astype('uint8'), 'RGB')
                 
                 canvas_result = st_canvas(
                     fill_color="rgba(255, 0, 0, 0.0)", 
@@ -286,7 +287,8 @@ with col_center:
                     imagen_dibujada = Image.alpha_composite(img_pil_original.convert('RGBA'), mask).convert('RGB')
                     st.success("✅ Dibujo fusionado con éxito en alta resolución.")
             
-        notas = st.text_area("Notas / Preguntas específicas:", height=60, placeholder="Ej: Analiza la zona que he rodeado en verde...")
+        # AQUI ESTA EL ARREGLO DEL ERROR DE LOS 68 PIXELES
+        notas = st.text_area("Notas / Preguntas específicas:", height=75, placeholder="Ej: Analiza la zona que he rodeado en verde...")
         
         # --- AUDIO BLINDADO CON HASATTR ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
