@@ -20,13 +20,11 @@ import xml.etree.ElementTree as ET
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS REVISADOS (CHAT FLOTANTE FORZADO) ---
+# --- ESTILOS CSS ---
 st.markdown("""
 <style>
-    /* Espacio extra al final para que la barra flotante no tape el texto */
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 120px !important; }
-    
-    /* Evitamos romper el flexbox nativo de Streamlit, solo ajustamos nuestros selects */
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
+    div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; }
     div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
     
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
@@ -51,18 +49,6 @@ st.markdown("""
     details.pocus-box { background-color: #e0f2f1; border-left: 6px solid #00897b; color: #004d40; }
     details.longevity-box { background-color: #fff8e1; border-left: 6px solid #ffc107; color: #ff6f00; }
     details.pubmed-box { background-color: #e8eaf6; border-left: 6px solid #3f51b5; color: #1a237e; }
-    
-    /* ANCLAJE FORZADO PARA EL CHAT FLOTANTE */
-    div[data-testid="stChatInput"] {
-        position: fixed !important;
-        bottom: 0px !important;
-        left: 0px !important;
-        width: 100% !important;
-        background-color: white !important;
-        padding: 10px 20px 25px 20px !important;
-        z-index: 9999 !important;
-        box-shadow: 0px -4px 10px rgba(0,0,0,0.1) !important;
-    }
     
     .pull-up { margin-top: -25px !important; margin-bottom: 5px !important; height: 1px !important; display: block !important; }
 </style>
@@ -264,12 +250,12 @@ with col_center:
         if st.button("🔄 NUEVO", type="secondary", use_container_width=True):
             st.session_state.resultado_analisis = None
             st.session_state.img_marcada = None
-            st.session_state.chat_messages = [] 
+            st.session_state.chat_messages = []  # Limpia el chat
             st.rerun()
 
     if btn_analizar:
         st.session_state.resultado_analisis = None
-        st.session_state.chat_messages = []
+        st.session_state.chat_messages = [] # Limpia el historial para el nuevo caso
         
         with st.spinner("🧠 Computando y consultando bases de datos..."):
             try:
@@ -332,7 +318,7 @@ with col_center:
                     caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</p></details>'
 
                 prompt = f"""
-                Rol: Médico Especialista IA V103. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V101. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
@@ -366,47 +352,46 @@ with col_center:
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # RENDERIZADO DEL DIAGNÓSTICO
+    # --- RENDERIZADO DEL INFORME Y EL CHAT FLOTANTE ---
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
+        
         if st.session_state.pdf_bytes:
             st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf")
             
         st.markdown("---")
-        st.markdown("### 💬 Chat Clínico")
-        st.caption("Resuelve dudas específicas sobre este caso con la IA.")
-        
+        st.markdown("### 💬 Discusión del Caso")
+        st.caption("Interactúa en vivo con la IA sobre este diagnóstico. ¿Dudas sobre dosis o tratamientos?")
+
+        # Mostrar historial del chat
         for msg in st.session_state.chat_messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
+        # Input flotante del chat (se ancla automáticamente a la parte inferior del contenedor)
+        if user_query := st.chat_input("Escribe tu pregunta clínica aquí..."):
+            st.session_state.chat_messages.append({"role": "user", "content": user_query})
+            with st.chat_message("user"):
+                st.markdown(user_query)
+            
+            with st.chat_message("assistant"):
+                try:
+                    chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
+                    # Forzamos a la IA a recordar el informe que acaba de generar
+                    ctx_chat = f"Eres el médico experto de guardia. Has generado el siguiente informe previo:\n{st.session_state.resultado_analisis}\n\nResponde de forma clínica y directa a la siguiente pregunta del compañero:\n{user_query}"
+                    
+                    respuesta_ia = chat_model.generate_content(ctx_chat)
+                    st.markdown(respuesta_ia.text)
+                    st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
+                except Exception as e:
+                    st.error(f"Error en la conexión del chat: {e}")
+
 with col_right:
     visor_abierto = True if st.session_state.get("img_marcada") else False
+    
     with st.expander("👁️ Visor Visual / IA", expanded=visor_abierto):
         if st.session_state.get("img_marcada"):
             st.markdown("#### 🎯 Detección IA")
             st.image(st.session_state.img_marcada, use_container_width=True)
         else:
             st.caption("Aquí aparecerá la imagen procesada o el análisis del agente.")
-
-
-# ==========================================
-# --- EL MOTOR DEL CHAT FLOTANTE GLOBAL ---
-# ==========================================
-if st.session_state.resultado_analisis:
-    # Al estar fuera de todas las columnas, Streamlit + el CSS lo fuerzan a pegarse a la parte inferior
-    if user_query := st.chat_input("💬 Escribe tu duda clínica aquí..."):
-        st.session_state.chat_messages.append({"role": "user", "content": user_query})
-        
-        try:
-            genai.configure(api_key=st.session_state.api_key)
-            chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
-            ctx_chat = f"Eres el médico experto de guardia. Has generado este informe previo:\n{st.session_state.resultado_analisis}\n\nResponde a la siguiente duda del usuario:\n{user_query}"
-            
-            respuesta_ia = chat_model.generate_content(ctx_chat)
-            st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
-            
-        except Exception as e:
-            st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error: {e}"})
-        
-        st.rerun()
