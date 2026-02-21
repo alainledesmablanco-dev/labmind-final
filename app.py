@@ -375,7 +375,7 @@ with col_center:
                 elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
+        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed")
         
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
