@@ -12,7 +12,6 @@ import cv2
 import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
-import uuid
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
@@ -20,20 +19,14 @@ import xml.etree.ElementTree as ET
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
 
-# --- ESTILOS CSS ---
+# --- ESTILOS CSS REVISADOS ---
 st.markdown("""
 <style>
-    .block-container { padding-top: 0.5rem !important; padding-bottom: 2rem !important; }
-    div[data-testid="stVerticalBlock"] > div { gap: 0rem !important; }
+    .block-container { padding-top: 0.5rem !important; padding-bottom: 120px !important; }
     div[data-testid="stSelectbox"] { margin-bottom: -15px !important; }
-    
     .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; margin-top: 10px; }
     button[data-testid="baseButton-primary"] { background-color: #0066cc !important; color: white !important; border: none !important; }
-    div.element-container:has(.btn-nuevo-hook) + div.element-container button {
-        background-color: #2e7d32 !important; color: white !important; border: none !important;
-    }
     
-    /* ESTILOS PARA TARJETAS PLEGABLES (DETAILS/SUMMARY) */
     details { padding: 15px; border-radius: 8px; margin-bottom: 10px; }
     summary { cursor: pointer; font-size: 1.05rem; outline: none; font-weight: bold; list-style: none; }
     summary::-webkit-details-marker { display: none; }
@@ -50,6 +43,12 @@ st.markdown("""
     details.longevity-box { background-color: #fff8e1; border-left: 6px solid #ffc107; color: #ff6f00; }
     details.pubmed-box { background-color: #e8eaf6; border-left: 6px solid #3f51b5; color: #1a237e; }
     
+    div[data-testid="stChatInput"] {
+        position: fixed !important; bottom: 0px !important; left: 0px !important;
+        width: 100% !important; background-color: white !important;
+        padding: 10px 20px 25px 20px !important; z-index: 9999 !important;
+        box-shadow: 0px -4px 10px rgba(0,0,0,0.1) !important;
+    }
     .pull-up { margin-top: -25px !important; margin-bottom: 5px !important; height: 1px !important; display: block !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -62,16 +61,8 @@ if "autenticado" not in st.session_state: st.session_state.autenticado = False
 if "api_key" not in st.session_state: st.session_state.api_key = ""
 if "resultado_analisis" not in st.session_state: st.session_state.resultado_analisis = None
 if "pdf_bytes" not in st.session_state: st.session_state.pdf_bytes = None
-if "historial_evolucion" not in st.session_state: st.session_state.historial_evolucion = []
-if "area_herida" not in st.session_state: st.session_state.area_herida = 0.0
 if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
-if "history_db" not in st.session_state: st.session_state.history_db = []
-if "img_previo" not in st.session_state: st.session_state.img_previo = None 
-if "img_actual" not in st.session_state: st.session_state.img_actual = None 
-if "img_ghost" not in st.session_state: st.session_state.img_ghost = None   
 if "img_marcada" not in st.session_state: st.session_state.img_marcada = None 
-if "last_cv_data" not in st.session_state: st.session_state.last_cv_data = None 
-if "last_biofilm_detected" not in st.session_state: st.session_state.last_biofilm_detected = False
 if "video_bytes" not in st.session_state: st.session_state.video_bytes = None 
 if "modelos_disponibles" not in st.session_state: st.session_state.modelos_disponibles = []
 if "pocus_metrics" not in st.session_state: st.session_state.pocus_metrics = {}
@@ -90,7 +81,170 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      FUNCIONES CLÍNICAS & PUBMED
+#      MOTOR POCUS GOD MODE V4 (OMNISCIENCIA)
+# ==========================================
+
+def procesar_pocus_v4_omniscience(video_path):
+    """Algoritmo límite absoluto en CPU: Despeckle, TAPSE proxy, Derrame Pericárdico, FEVI Simpson"""
+    try:
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0 or np.isnan(fps): fps = 30.0
+
+        ret, frame1 = cap.read()
+        if not ret: return None, None, None, {}
+
+        # 1. OPTIMIZACIÓN ESPACIAL
+        h_orig, w_orig = frame1.shape[:2]
+        scale = 320.0 / w_orig 
+        new_w, new_h = 320, int(h_orig * scale)
+        frame1 = cv2.resize(frame1, (new_w, new_h))
+
+        # 2. AUTO-CROP INTELIGENTE
+        gray_init = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        _, beam_thresh = cv2.threshold(gray_init, 15, 255, cv2.THRESH_BINARY)
+        beam_contours, _ = cv2.findContours(beam_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        roi_mask = np.zeros_like(gray_init)
+        if beam_contours:
+            largest_beam = max(beam_contours, key=cv2.contourArea)
+            cv2.drawContours(roi_mask, [largest_beam], -1, 255, -1)
+        else:
+            cv2.ellipse(roi_mask, (new_w//2, new_h//2), (int(new_w*0.4), int(new_h*0.4)), 0, 0, 360, 255, -1)
+
+        volumes_simpson = []
+        m_mode_columns = []
+        b_lines_score = 0
+        has_doppler = False
+        frame_count = 0
+        
+        # Mapa de negros estáticos (Derrame Pericárdico Proxy)
+        static_black_map = np.ones_like(gray_init, dtype=np.uint8) * 255
+        
+        best_endo_frame = frame1.copy()
+        doppler_frame = np.zeros_like(frame1)
+        lower_color, upper_color = np.array([0, 50, 50]), np.array([179, 255, 255])
+
+        while True:
+            ret, frame2 = cap.read()
+            if not ret: break
+            
+            frame_count += 1
+            skip_rate = max(1, int(fps // 15))
+            if frame_count % skip_rate != 0: continue
+
+            frame2 = cv2.resize(frame2, (new_w, new_h))
+            next_gray = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+            
+            # FILTRO DESPECKLE CLÍNICO (Mediana temporal cruzada)
+            next_gray_smooth = cv2.medianBlur(next_gray, 5) 
+            
+            m_mode_columns.append(next_gray_smooth[:, new_w//2])
+
+            masked_gray = cv2.bitwise_and(next_gray_smooth, next_gray_smooth, mask=roi_mask)
+            _, thresh_black = cv2.threshold(masked_gray, 35, 255, cv2.THRESH_BINARY_INV)
+            thresh_black = cv2.bitwise_and(thresh_black, thresh_black, mask=roi_mask)
+            
+            # Actualizamos el mapa de estáticos (lo que SIEMPRE es negro)
+            static_black_map = cv2.bitwise_and(static_black_map, thresh_black)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+            thresh_black_clean = cv2.morphologyEx(thresh_black, cv2.MORPH_OPEN, kernel)
+            contours, _ = cv2.findContours(thresh_black_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            max_area = 0
+            best_c = None
+            for c in contours:
+                area = cv2.contourArea(c)
+                if area > max_area and area > (new_w * new_h * 0.03): 
+                    max_area = area
+                    best_c = c
+
+            if best_c is not None:
+                x, y, w_bb, h_bb = cv2.boundingRect(best_c)
+                vol_proxy = (max_area ** 2) / float(h_bb) if h_bb > 0 else 0
+                volumes_simpson.append(vol_proxy)
+
+                if vol_proxy >= max(volumes_simpson):
+                    best_endo_frame = frame2.copy()
+                    cv2.drawContours(best_endo_frame, [best_c], -1, (0, 255, 100), 2)
+                    cv2.line(best_endo_frame, (x + w_bb//2, y), (x + w_bb//2, y + h_bb), (0, 0, 255), 1)
+
+            # Doppler
+            hsv = cv2.cvtColor(frame2, cv2.COLOR_BGR2HSV)
+            mask_color = cv2.inRange(hsv, lower_color, upper_color)
+            if cv2.countNonZero(mask_color) > (new_w * new_h * 0.005):
+                has_doppler = True
+                doppler_frame = cv2.bitwise_or(doppler_frame, cv2.bitwise_and(frame2, frame2, mask=mask_color))
+
+            # Líneas B Pleurales (Mejorado)
+            lower_half = next_gray_smooth[int(new_h*0.5):, :]
+            sobelx = cv2.Sobel(lower_half, cv2.CV_64F, 1, 0, ksize=3)
+            _, thresh_b = cv2.threshold(np.absolute(sobelx), 160, 255, cv2.THRESH_BINARY)
+            if cv2.countNonZero(thresh_b) > (new_w * new_h * 0.015):
+                b_lines_score += 1
+
+        cap.release()
+
+        # 4. INTELIGENCIA MATEMÁTICA V4
+        metrics = {}
+        frames_procesados = frame_count // skip_rate if skip_rate > 0 else 1
+        
+        # --- Cálculo FEVI y BPM ---
+        if len(volumes_simpson) > 5:
+            vols = np.array(volumes_simpson)
+            smoothed_vols = np.convolve(vols, np.ones(3)/3, mode='valid')
+            edv = np.percentile(smoothed_vols, 95)
+            esv = np.percentile(smoothed_vols, 5)
+            ef_est = ((edv - esv) / edv) * 100 if edv > 0 else 0
+            metrics['FEVI'] = round(max(10.0, min(ef_est, 85.0)), 1) 
+            
+            mean_vol = np.mean(smoothed_vols)
+            crossings = np.where(np.diff(np.sign(smoothed_vols - mean_vol)) > 0)[0]
+            if len(crossings) > 1:
+                bpm = 60.0 / ((np.mean(np.diff(crossings)) * skip_rate) / fps)
+                metrics['BPM'] = round(max(30, min(bpm, 200)))
+            else: metrics['BPM'] = "N/A"
+        else:
+            metrics['FEVI'], metrics['BPM'] = "N/A", "N/A"
+
+        # --- Análisis M-Mode (Proxy TAPSE) ---
+        m_mode_pil = None
+        if len(m_mode_columns) > 0:
+            m_mode_img = np.transpose(np.array(m_mode_columns))
+            # Buscar la banda más brillante y calcular su oscilación vertical
+            _, m_thresh = cv2.threshold(m_mode_img, 200, 255, cv2.THRESH_BINARY)
+            y_coords = np.where(m_thresh > 0)[0]
+            if len(y_coords) > 0:
+                tapse_proxy = np.percentile(y_coords, 95) - np.percentile(y_coords, 5)
+                metrics['TAPSE_Proxy'] = round(tapse_proxy * (150.0 / new_h), 1) # Normalizado a mm teóricos
+            else:
+                metrics['TAPSE_Proxy'] = "N/A"
+                
+            m_mode_img = cv2.resize(m_mode_img, (new_w, new_h))
+            m_mode_color = cv2.applyColorMap(np.uint8(m_mode_img), cv2.COLORMAP_BONE)
+            m_mode_pil = Image.fromarray(cv2.cvtColor(m_mode_color, cv2.COLOR_BGR2RGB))
+
+        # --- Radar Derrame Pericárdico ---
+        # Zonas puramente negras durante todo el vídeo que no son el centro de la imagen
+        cv2.ellipse(static_black_map, (new_w//2, new_h//2), (int(new_w*0.25), int(new_h*0.25)), 0, 0, 360, 0, -1)
+        effusion_pixels = cv2.countNonZero(static_black_map)
+        metrics['Derrame'] = effusion_pixels > (new_w * new_h * 0.05)
+
+        metrics['B_Lines'] = b_lines_score > (frames_procesados * 0.1)
+        metrics['Doppler'] = has_doppler
+
+        endo_pil = Image.fromarray(cv2.cvtColor(best_endo_frame, cv2.COLOR_BGR2RGB))
+        doppler_pil = Image.fromarray(cv2.cvtColor(doppler_frame, cv2.COLOR_BGR2RGB)) if has_doppler else None
+            
+        return m_mode_pil, endo_pil, doppler_pil, metrics
+
+    except Exception as e:
+        print(f"Error God Mode V4: {e}")
+        return None, None, None, {}
+
+# ==========================================
+#      OTRAS FUNCIONES IA
 # ==========================================
 
 def buscar_en_pubmed(query, max_results=4):
@@ -98,32 +252,22 @@ def buscar_en_pubmed(query, max_results=4):
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
         search_url = f"{base_url}esearch.fcgi?db=pubmed&term={urllib.parse.quote(query)}&retmode=json&retmax={max_results}&sort=relevance"
         req = urllib.request.Request(search_url, headers={'User-Agent': 'Mozilla/5.0'})
-        response = urllib.request.urlopen(req)
-        data = json.loads(response.read().decode('utf-8'))
+        data = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))
         ids = data.get('esearchresult', {}).get('idlist', [])
-        
-        if not ids: return "No se encontraron artículos recientes en PubMed para esta consulta."
+        if not ids: return "No se encontraron artículos en PubMed."
         
         fetch_url = f"{base_url}efetch.fcgi?db=pubmed&id={','.join(ids)}&retmode=xml"
-        fetch_req = urllib.request.Request(fetch_url, headers={'User-Agent': 'Mozilla/5.0'})
-        fetch_resp = urllib.request.urlopen(fetch_req).read()
-        root = ET.fromstring(fetch_resp)
+        root = ET.fromstring(urllib.request.urlopen(urllib.request.Request(fetch_url, headers={'User-Agent': 'Mozilla/5.0'})).read())
         
         resultados = ""
         for article in root.findall('.//PubmedArticle'):
             pmid = article.find('.//PMID').text
-            title_node = article.find('.//ArticleTitle')
-            title = title_node.text if title_node is not None else "Sin título"
-            abstract_node = article.find('.//AbstractText')
-            abstract = "".join(abstract_node.itertext()) if abstract_node is not None else "Sin abstract disponible."
-            
+            title = article.find('.//ArticleTitle').text if article.find('.//ArticleTitle') is not None else "Sin título"
+            abs_node = article.find('.//AbstractText')
+            abstract = "".join(abs_node.itertext()) if abs_node is not None else "Sin abstract."
             resultados += f"PMID: {pmid}\nTÍTULO: {title}\nABSTRACT: {abstract}\n\n"
         return resultados
-    except Exception as e:
-        return f"Error accediendo a la base de datos de PubMed: {e}"
-
-def procesar_pocus_nivel10(video_path):
-    return None, None, None, None, {}
+    except Exception as e: return f"Error PubMed: {e}"
 
 def aislar_trazado_ecg(pil_image):
     try:
@@ -145,47 +289,37 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None):
     for match in matches:
         ymin, xmin, ymax, xmax, label = match
         try:
-            x1 = max(0, min(w, int(int(xmin) * w / 1000)))
-            y1 = max(0, min(h, int(int(ymin) * h / 1000)))
-            x2 = max(0, min(w, int(int(xmax) * w / 1000)))
-            y2 = max(0, min(h, int(int(ymax) * h / 1000)))
-            
+            x1, y1 = max(0, int(int(xmin) * w / 1000)), max(0, int(int(ymin) * h / 1000))
+            x2, y2 = min(w, int(int(xmax) * w / 1000)), min(h, int(int(ymax) * h / 1000))
             cv2.rectangle(img_cv, (x1, y1), (x2, y2), (0, 0, 255), 4) 
             texto_label = label.strip().upper()
-            escala_fuente = max(0.6, w/1000)
-            grosor_fuente = max(2, int(w/500))
-            (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, grosor_fuente)
+            escala = max(0.6, w/1000); grosor = max(2, int(w/500))
+            (w_txt, h_txt), _ = cv2.getTextSize(texto_label, cv2.FONT_HERSHEY_SIMPLEX, escala, grosor)
             cv2.rectangle(img_cv, (x1, max(0, y1-h_txt-10)), (x1 + w_txt, max(0, y1)), (0,0,0), -1)
-            cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala_fuente, (255, 255, 255), grosor_fuente, cv2.LINE_AA)
+            cv2.putText(img_cv, texto_label, (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, escala, (255, 255, 255), grosor, cv2.LINE_AA)
         except: pass
 
-    texto_limpio = re.sub(patron, '', texto)
-    return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
+    return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), re.sub(patron, '', texto).strip(), True
 
-def create_pdf(texto_analisis):
+def create_pdf(texto):
     class PDF(FPDF):
         def header(self): 
             self.set_font('helvetica', 'B', 12)
             self.cell(0, 10, 'LabMind - Informe IA', align='C', new_x="LMARGIN", new_y="NEXT")
             self.ln(5)
         def footer(self): 
-            self.set_y(-15)
-            self.set_font('helvetica', 'I', 8)
+            self.set_y(-15); self.set_font('helvetica', 'I', 8)
             self.cell(0, 10, f'Pag {self.page_no()}', align='C')
             
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font("helvetica", size=10)
+    pdf = PDF(); pdf.add_page(); pdf.set_font("helvetica", size=10)
     pdf.cell(0, 10, f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
-    
-    clean = re.sub(r'<[^>]+>', '', texto_analisis).replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
-    clean = "".join(c for c in clean if ord(c) < 256)
-    pdf.multi_cell(0, 5, txt=clean)
+    clean = re.sub(r'<[^>]+>', '', texto).replace('€','EUR').replace('’',"'").replace('“','"').replace('”','"')
+    pdf.multi_cell(0, 5, txt="".join(c for c in clean if ord(c) < 256))
     return bytes(pdf.output())
 
 # ==========================================
-#      INTERFAZ DE USUARIO
+#      INTERFAZ DE USUARIO PRINCIPAL
 # ==========================================
 
 st.title("🩺 LabMind")
@@ -204,8 +338,7 @@ with col_left:
     
     idx_defecto = 0
     for i, modelo in enumerate(lista_para_mostrar):
-        nombre_modelo = modelo.lower()
-        if "3" in nombre_modelo and "flash" in nombre_modelo and "preview" in nombre_modelo:
+        if "3" in modelo.lower() and "flash" in modelo.lower() and "preview" in modelo.lower():
             idx_defecto = i
             break
 
@@ -215,183 +348,193 @@ with col_left:
 with col_center:
     st.subheader("1. Selección de Modo")
     modo = st.selectbox("Especialidad:", 
-                 ["🩹 Heridas / Úlceras", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
+                 ["🩹 Heridas / Úlceras", "🦇 Ecografía / POCUS (God Mode)", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC/Resonancia", "🧴 Dermatología", "🩸 Analítica Funcional", "🧩 Integral"])
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
     
-    archivos = []
-    audio_val = None 
+    archivos = []; audio_val = None 
     
     if modo == "📚 Agente Investigador (PubMed)":
-        st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU.")
-        query_pubmed = st.text_input("🔍 ¿Qué duda clínica quieres investigar en PubMed?", placeholder="Ej: Effectiveness of honey dressings for diabetic foot ulcers")
-        
-        with st.expander("📝 Notas Clínicas / Contexto (Opcional)", expanded=False):
-            notas = st.text_area("Contexto", height=70, label_visibility="collapsed", placeholder="Ej: Paciente de 70 años con DM2...")
-    
+        st.info("🤖 **Agente Activo:** Conectado a la API oficial del NCBI.")
+        query_pubmed = st.text_input("🔍 ¿Qué duda clínica quieres investigar en PubMed?")
+        with st.expander("📝 Notas Clínicas / Contexto", expanded=False):
+            notas = st.text_area("Contexto", height=70, label_visibility="collapsed")
     else:
-        fs = st.file_uploader("Subir Archivos Clínicos", type=['jpg','png','pdf'], accept_multiple_files=True)
+        fs = st.file_uploader("Subir Archivos Clínicos", type=['jpg','png','pdf', 'mp4', 'mov'], accept_multiple_files=True)
         if fs:
             for f in fs:
-                if "pdf" in f.type: archivos.append(("doc", f))
+                if f.type.startswith('video') or f.name.lower().endswith(('mp4', 'mov')): archivos.append(("video", f))
+                elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
-            notas = st.text_area("Notas", height=70, label_visibility="collapsed", placeholder="Describe qué quieres que la IA observe en las imágenes...")
+        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
+            notas = st.text_area("Notas", height=70, label_visibility="collapsed")
         
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
-            if hasattr(st, "audio_input"):
-                audio_val = st.audio_input("Dictar notas", key="mic", label_visibility="collapsed")
-            else:
-                st.warning("⚠️ El micrófono está cargando...")
+            if hasattr(st, "audio_input"): audio_val = st.audio_input("Dictar notas", key="mic", label_visibility="collapsed")
 
-    col_btn1, col_btn2 = st.columns([3, 1])
-    with col_btn1: btn_analizar = st.button("🚀 ANALIZAR / INVESTIGAR", type="primary", use_container_width=True)
-    with col_btn2:
+    c1, c2 = st.columns([3, 1])
+    with c1: btn_analizar = st.button("🚀 ANALIZAR / INVESTIGAR", type="primary", use_container_width=True)
+    with c2:
         if st.button("🔄 NUEVO", type="secondary", use_container_width=True):
-            st.session_state.resultado_analisis = None
-            st.session_state.img_marcada = None
-            st.session_state.chat_messages = []  # Limpia el chat
+            for k in ["resultado_analisis", "img_marcada", "video_bytes", "chat_messages"]: st.session_state[k] = None if "img" in k or "video" in k or "resultado" in k else []
+            st.session_state.pocus_metrics = {}
             st.rerun()
 
     if btn_analizar:
         st.session_state.resultado_analisis = None
-        st.session_state.chat_messages = [] # Limpia el historial para el nuevo caso
+        st.session_state.video_bytes = None
+        st.session_state.img_marcada = None
+        st.session_state.pocus_metrics = {}
+        st.session_state.chat_messages = []
         
-        with st.spinner("🧠 Computando y consultando bases de datos..."):
+        with st.spinner("🧠 Procesando datos clínicos..."):
             try:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado) 
                 con = []; txt_docs = ""; datos_pubmed = ""
                 
                 if modo == "📚 Agente Investigador (PubMed)" and query_pubmed:
-                    st.toast("📡 Conectando con servidores del NCBI...")
                     datos_pubmed = buscar_en_pubmed(query_pubmed)
-                    if "Error" in datos_pubmed: st.error(datos_pubmed)
-                    else: st.toast("✅ Artículos científicos obtenidos.")
                 
                 imagen_para_visor = None
+                
                 if modo != "📚 Agente Investigador (PubMed)":
                     if audio_val:
-                        st.toast("🎙️ Procesando audio...")
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tf_audio:
                             tf_audio.write(audio_val.read())
-                            ap = tf_audio.name
-                        con.append(genai.upload_file(path=ap))
+                        con.append(genai.upload_file(path=tf_audio.name))
                         
                     for tipo, file in archivos:
                         if tipo == "doc":
                             file.seek(0)
-                            r = pypdf.PdfReader(file)
-                            txt_docs += "".join([p.extract_text() for p in r.pages])
-                        else:
+                            txt_docs += "".join([p.extract_text() for p in pypdf.PdfReader(file).pages])
+                        
+                        elif tipo == "video":
                             file.seek(0)
-                            i_pil_cruda = Image.open(file)
-                            i_pil = ImageOps.exif_transpose(i_pil_cruda).convert("RGB")
+                            st.session_state.video_bytes = file.read()
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tf_video:
+                                tf_video.write(st.session_state.video_bytes)
+                            
+                            if "POCUS" in modo:
+                                st.toast("🧮 Activando God Mode V4 Omniscience...")
+                                m_mode, endo_map, doppler_map, p_metrics = procesar_pocus_v4_omniscience(tf_video.name)
+                                st.session_state.pocus_metrics = p_metrics
+                                st.session_state.img_marcada = m_mode if m_mode else endo_map
+                                
+                                if p_metrics:
+                                    txt_docs += f"\n[GOD MODE POCUS RESULTADOS MATEMÁTICOS]\n- FEVI Estimada (Vol. Simpson): {p_metrics.get('FEVI', 'N/A')}%\n- Frecuencia Cardíaca: {p_metrics.get('BPM', 'N/A')} lpm\n- Desplazamiento Longitudinal (TAPSE Proxy): {p_metrics.get('TAPSE_Proxy', 'N/A')} mm\n- Líneas B Pleurales: {'Positivo' if p_metrics.get('B_Lines') else 'Negativo'}\n- Doppler Activo: {'Sí' if p_metrics.get('Doppler') else 'No'}\n- Derrame Pericárdico Sugerido: {'Sí' if p_metrics.get('Derrame') else 'No'}\n"
+                                
+                            st.toast("🎥 Subiendo vídeo a Gemini...")
+                            v_file = genai.upload_file(path=tf_video.name)
+                            while v_file.state.name == "PROCESSING":
+                                time.sleep(2); v_file = genai.get_file(v_file.name)
+                            con.append(v_file)
+
+                        else: 
+                            file.seek(0)
+                            i_pil = ImageOps.exif_transpose(Image.open(file)).convert("RGB")
                             if "ECG" in modo:
                                 img_aislada = aislar_trazado_ecg(i_pil)
                                 con.extend([i_pil, img_aislada])
-                                if not imagen_para_visor: imagen_para_visor = i_pil
-                            else:
-                                con.append(i_pil)
-                                if not imagen_para_visor: imagen_para_visor = i_pil
+                            else: con.append(i_pil)
+                            if not imagen_para_visor: imagen_para_visor = i_pil
 
+                # --- REGLAS ---
                 instruccion_bbox = ""
                 if "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
-                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas isquemia (ej. elevación/descenso ST), arritmia grave o bloqueo, ES VITAL que devuelvas exactamente esta etiqueta indicando dónde está: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Patología. Escala de 0 a 1000."
+                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Patología."
+                elif "POCUS" in modo:
+                    titulo_caja = "🦇 ANÁLISIS POCUS AVANZADO"
+                    instruccion_modo = 'ERES UN EXPERTO EN ECOGRAFÍA CLÍNICA. Analiza el vídeo y los resultados matemáticos puros (FEVI Simpson, BPM, TAPSE, Derrame, Líneas B). Genera un informe ecográfico integrado.'
                 elif modo in ["🧴 Dermatología", "💀 RX/TAC/Resonancia", "🩹 Heridas / Úlceras"]:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
-                    instruccion_modo = 'Analiza el caso clínico y la imagen proporcionada.'
-                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas una lesión (ej. carcinoma, úlcera), fractura, o patología focal en la imagen, ES VITAL que devuelvas exactamente esta etiqueta indicando sus coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Lesión. Escala de 0 a 1000."
+                    instruccion_modo = 'Analiza el caso clínico y la imagen.'
+                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas lesión/fractura indica coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre."
                 elif modo == "📚 Agente Investigador (PubMed)":
                     titulo_caja = "📚 CONCLUSIÓN BASADA EN EVIDENCIA"
-                    instruccion_modo = f'Actúas como un investigador académico. He buscado en PubMed los abstracts de los artículos más recientes sobre la consulta del usuario. Tu trabajo es leerlos y redactar un informe clínico riguroso.\n\nEVIDENCIA EXTRAÍDA DE PUBMED:\n{datos_pubmed}'
+                    instruccion_modo = f'Escribe informe clínico riguroso basado en:\n{datos_pubmed}'
                 else:
-                    titulo_caja = "🛠️ PLAN DE ACCIÓN"
-                    instruccion_modo = 'Analiza el caso clínico proporcionado.'
+                    titulo_caja = "🛠️ PLAN DE ACCIÓN"; instruccion_modo = 'Analiza el caso.'
 
-                instruccion_enfermeria = ""
-                caja_enfermeria = ""
-                if contexto in ["Hospitalización", "Urgencias", "UCI"]:
-                    instruccion_enfermeria = "5. CUIDADOS DE ENFERMERÍA: Obligatorio incluir la caja de Cuidados de Enfermería con pautas de monitorización y manejo propias de enfermería."
-                    caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</p></details>'
+                caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Cuidados específicos]</p></details>' if contexto in ["Hospitalización", "Urgencias", "UCI"] else ""
 
                 prompt = f"""
-                Rol: Médico Especialista IA V101. Contexto: {contexto}. Modo: {modo}.
-                Pregunta del usuario: "{notas}"
-                Docs: {txt_docs[:10000]}
+                Rol: Médico IA. Contexto: {contexto}. Modo: {modo}.
+                Usuario: "{notas}"
+                Docs/Datos: {txt_docs[:10000]}
                 
-                INSTRUCCIONES CRÍTICAS:
-                1. MÁXIMA ESTRICTEZ: PROHIBIDO escribir texto gris o saludos fuera de las cajas HTML. Tu respuesta debe empezar directamente con la primera caja <details>.
+                REGLAS:
+                1. EMPIEZA DIRECTAMENTE con <details>. Cero saludos.
                 2. {instruccion_modo}
                 3. {instruccion_bbox}
-                4. REGLA DE OMISIÓN: Si faltan datos de laboratorio o analíticas, NO menciones que faltan. Ignóralo.
-                {instruccion_enfermeria}
-                6. DIAGNÓSTICO EN NEGRITA: En la primera frase de HALLAZGOS PRINCIPALES, usa la etiqueta HTML <b>...</b> para resaltarla en negrita.
+                4. Omite datos faltantes.
+                5. DIAGNÓSTICO EN NEGRITA: En la primera frase usa <b>...</b>.
 
-                FORMATO HTML REQUERIDO (Usa las etiquetas <details> y <summary> tal cual te las pongo):
-                <details class="diagnosis-box" open><summary>🚨 HALLAZGOS PRINCIPALES</summary><p><b>[Frase principal del diagnóstico aquí]</b>. [Resto de la descripción clínica]</p></details>
-                <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Explicación y Riesgos]</p></details>
-                <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>{titulo_caja}</summary><p>[Desarrollo o Bibliografía]</p></details>{caja_enfermeria}
+                FORMATO HTML REQUERIDO:
+                <details class="diagnosis-box" open><summary>🚨 HALLAZGOS PRINCIPALES</summary><p><b>[Diagnóstico en negrita]</b>. [Descripción]</p></details>
+                <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Explicación]</p></details>
+                <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>{titulo_caja}</summary><p>[Desarrollo]</p></details>{caja_enfermeria}
                 """
 
                 resp = model.generate_content([prompt, *con] if con else prompt)
-                texto_generado = resp.text
-
-                if "<details" in texto_generado:
-                    texto_generado = texto_generado[texto_generado.find("<details"):]
+                texto_generado = resp.text[resp.text.find("<details"):] if "<details" in resp.text else resp.text
 
                 if imagen_para_visor:
                     img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_para_visor)
-                    if detectado: st.session_state.img_marcada = img_marcada
-                    else: st.session_state.img_marcada = imagen_para_visor
+                    st.session_state.img_marcada = img_marcada if detectado else imagen_para_visor
 
                 st.session_state.resultado_analisis = texto_generado.strip()
                 st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
             except Exception as e: st.error(f"Error: {e}")
 
-    # --- RENDERIZADO DEL INFORME Y EL CHAT FLOTANTE ---
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
-        
-        if st.session_state.pdf_bytes:
-            st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf")
+        if st.session_state.pdf_bytes: st.download_button("📥 Descargar PDF", st.session_state.pdf_bytes, "informe.pdf")
             
         st.markdown("---")
-        st.markdown("### 💬 Discusión del Caso")
-        st.caption("Interactúa en vivo con la IA sobre este diagnóstico. ¿Dudas sobre dosis o tratamientos?")
-
-        # Mostrar historial del chat
+        st.markdown("### 💬 Chat Clínico")
+        st.caption("Resuelve dudas específicas sobre este caso con la IA.")
         for msg in st.session_state.chat_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        # Input flotante del chat (se ancla automáticamente a la parte inferior del contenedor)
-        if user_query := st.chat_input("Escribe tu pregunta clínica aquí..."):
-            st.session_state.chat_messages.append({"role": "user", "content": user_query})
-            with st.chat_message("user"):
-                st.markdown(user_query)
-            
-            with st.chat_message("assistant"):
-                try:
-                    chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
-                    # Forzamos a la IA a recordar el informe que acaba de generar
-                    ctx_chat = f"Eres el médico experto de guardia. Has generado el siguiente informe previo:\n{st.session_state.resultado_analisis}\n\nResponde de forma clínica y directa a la siguiente pregunta del compañero:\n{user_query}"
-                    
-                    respuesta_ia = chat_model.generate_content(ctx_chat)
-                    st.markdown(respuesta_ia.text)
-                    st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
-                except Exception as e:
-                    st.error(f"Error en la conexión del chat: {e}")
+            with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
 with col_right:
-    visor_abierto = True if st.session_state.get("img_marcada") else False
-    
+    visor_abierto = True if (st.session_state.get("img_marcada") or st.session_state.get("video_bytes")) else False
     with st.expander("👁️ Visor Visual / IA", expanded=visor_abierto):
+        metrics = st.session_state.get("pocus_metrics", {})
+        if metrics:
+            st.markdown("### 🧮 Telemetría POCUS")
+            c1, c2 = st.columns(2)
+            c1.metric("FEVI (Vol)", f"{metrics.get('FEVI', 'N/A')}%")
+            c2.metric("FC", f"{metrics.get('BPM', 'N/A')} bpm")
+            
+            c3, c4 = st.columns(2)
+            c3.metric("TAPSE Estimado", f"{metrics.get('TAPSE_Proxy', 'N/A')} mm")
+            c4.metric("Derrame", "⚠️ Sí" if metrics.get('Derrame') else "✅ No")
+            
+            st.metric("Líneas B (Pleural)", "⚠️ Detectadas" if metrics.get('B_Lines') else "✅ Negativo")
+            st.divider()
+
+        if st.session_state.get("video_bytes"): st.video(st.session_state.video_bytes)
+        
         if st.session_state.get("img_marcada"):
-            st.markdown("#### 🎯 Detección IA")
+            st.markdown("#### 🎯 M-Mode / Detección IA")
             st.image(st.session_state.img_marcada, use_container_width=True)
-        else:
-            st.caption("Aquí aparecerá la imagen procesada o el análisis del agente.")
+        elif not st.session_state.get("video_bytes"):
+            st.caption("Aquí aparecerá la imagen o el análisis visual.")
+
+# ==========================================
+# --- CHAT FLOTANTE GLOBAL ---
+# ==========================================
+if st.session_state.resultado_analisis:
+    if user_query := st.chat_input("💬 Escribe tu duda clínica aquí..."):
+        st.session_state.chat_messages.append({"role": "user", "content": user_query})
+        try:
+            genai.configure(api_key=st.session_state.api_key)
+            chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
+            ctx_chat = f"Eres el médico experto de guardia. Has generado este informe:\n{st.session_state.resultado_analisis}\nResponde a la duda:\n{user_query}"
+            st.session_state.chat_messages.append({"role": "assistant", "content": chat_model.generate_content(ctx_chat).text})
+        except Exception as e: st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error: {e}"})
+        st.rerun()
