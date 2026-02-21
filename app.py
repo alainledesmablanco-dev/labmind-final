@@ -62,7 +62,6 @@ for key in ["autenticado", "api_key", "resultado_analisis", "pdf_bytes", "chat_m
 if "autenticado" not in st.session_state or not st.session_state.autenticado:
     st.session_state.autenticado = False
 if "pocus_metrics" not in st.session_state: st.session_state.pocus_metrics = {}
-if "sam_metrics" not in st.session_state: st.session_state.sam_metrics = {}
 
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
 if not st.session_state.autenticado:
@@ -76,6 +75,17 @@ if not st.session_state.autenticado:
             cookie_manager.set("labmind_secret_key", k, expires_at=expires)
             st.session_state.api_key = k; st.session_state.autenticado = True; st.rerun()
         st.stop()
+
+# ==========================================
+#      CONFIGURACIÓN DE SEGURIDAD MÉDICA
+# ==========================================
+# Esto apaga los filtros de Google para que no censure radiografías ni heridas
+MEDICAL_SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+]
 
 # ==========================================
 #      MOTOR POCUS GOD MODE V6
@@ -237,40 +247,6 @@ def procesar_pocus_v6_singularidad(video_path):
         return None, None, None, {}
 
 # ==========================================
-#      MOTOR MOBILE SAM (HERIDAS/DERMA)
-# ==========================================
-def segmentar_herida_sam(img_pil):
-    """Extrae el contorno exacto de la úlcera/lesión con MobileSAM 1"""
-    try:
-        from ultralytics import SAM
-        model = SAM('mobile_sam.pt')
-        img_cv = cv2.cvtColor(np.array(img_pil.convert('RGB')), cv2.COLOR_RGB2BGR)
-        h, w = img_cv.shape[:2]
-        
-        # Le pedimos a SAM que busque en el centro de la imagen (donde se suele enfocar la lesión)
-        # Formato robusto para Ultralytics
-        results = model.predict(img_cv, points=[[w//2, h//2]], labels=[1], verbose=False)
-        
-        if results and len(results)>0 and results[0].masks is not None:
-            mask = results[0].masks.data[0].cpu().numpy()
-            mask = cv2.resize(mask, (w, h))
-            
-            overlay = img_cv.copy()
-            # Tinte Azul Translúcido para el interior
-            overlay[mask > 0.5] = overlay[mask > 0.5] * 0.5 + np.array([255, 50, 50]) * 0.5
-            
-            # Contorno Verde Flúor exacto
-            contours, _ = cv2.findContours((mask > 0.5).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(overlay, contours, -1, (0, 255, 0), 3)
-            
-            area_px = int(np.sum(mask > 0.5))
-            return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)), area_px
-            
-    except Exception as e:
-        print(f"Error MobileSAM: {e}")
-    return None, 0
-
-# ==========================================
 #      OTRAS FUNCIONES IA
 # ==========================================
 
@@ -405,7 +381,6 @@ with col_center:
         if st.button("🔄 NUEVO", type="secondary", use_container_width=True):
             for k in ["resultado_analisis", "img_marcada", "video_bytes", "chat_messages"]: st.session_state[k] = None if "img" in k or "video" in k or "resultado" in k else []
             st.session_state.pocus_metrics = {}
-            st.session_state.sam_metrics = {}
             st.rerun()
 
     if btn_analizar:
@@ -413,7 +388,6 @@ with col_center:
         st.session_state.video_bytes = None
         st.session_state.img_marcada = None
         st.session_state.pocus_metrics = {}
-        st.session_state.sam_metrics = {}
         st.session_state.chat_messages = []
         
         with st.spinner("🧠 Analizando e identificando contexto..."):
@@ -421,7 +395,6 @@ with col_center:
                 genai.configure(api_key=st.session_state.api_key)
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado) 
                 con = []; txt_docs = ""; datos_pubmed = ""
-                sam_utilizado = False
                 
                 if modo == "📚 Agente Investigador (PubMed)" and query_pubmed:
                     datos_pubmed = buscar_en_pubmed(query_pubmed)
@@ -446,14 +419,15 @@ with col_center:
                                 tf_video.write(st.session_state.video_bytes)
                             
                             if "POCUS" in modo or modo == "✨ Autodetectar":
-                                st.toast("🧮 Activando God Mode Ultrasonido...")
+                                st.toast("🧮 Vídeo detectado: Activando God Mode Ultrasonido...")
                                 m_mode, endo_map, doppler_map, p_metrics = procesar_pocus_v6_singularidad(tf_video.name)
                                 st.session_state.pocus_metrics = p_metrics
                                 st.session_state.img_marcada = m_mode if m_mode else endo_map
                                 
                                 if p_metrics:
-                                    txt_docs += f"\n[TELEMETRÍA POCUS V6]\n- FEVI: {p_metrics.get('FEVI', 'N/A')}%\n- FC: {p_metrics.get('BPM', 'N/A')} lpm\n- Ritmo: {p_metrics.get('Ritmo', 'N/A')}\n- Strain: {p_metrics.get('Strain_Proxy', 'N/A')}\n- VCI: {p_metrics.get('Colapso_VCI', 'N/A')}%\n"
+                                    txt_docs += f"\n[TELEMETRÍA POCUS V6]\n- FEVI Estimada (Vol): {p_metrics.get('FEVI', 'N/A')}%\n- FC: {p_metrics.get('BPM', 'N/A')} lpm\n- Ritmo: {p_metrics.get('Ritmo', 'N/A')}\n- Strain Tisular Proxy: {p_metrics.get('Strain_Proxy', 'N/A')}\n- Colapso VCI Proxy: {p_metrics.get('Colapso_VCI', 'N/A')}%\n- Líneas B Pleurales: {'Positivo' if p_metrics.get('B_Lines') else 'Negativo'}\n- Doppler Activo: {'Sí' if p_metrics.get('Doppler') else 'No'}\n- Derrame Pericárdico Sugerido: {'Sí' if p_metrics.get('Derrame') else 'No'}\n"
                                 
+                            st.toast("🎥 Subiendo archivo a Gemini Vision...")
                             v_file = genai.upload_file(path=tf_video.name)
                             while v_file.state.name == "PROCESSING":
                                 time.sleep(2); v_file = genai.get_file(v_file.name)
@@ -462,17 +436,6 @@ with col_center:
                         else: 
                             file.seek(0)
                             i_pil = ImageOps.exif_transpose(Image.open(file)).convert("RGB")
-                            
-                            # --- INTEGRACIÓN MOBILE SAM ---
-                            if modo in ["🩹 Heridas / Úlceras", "🧴 Dermatología"]:
-                                st.toast("🦠 Activando Segmentación MobileSAM...")
-                                sam_img, area_px = segmentar_herida_sam(i_pil)
-                                if sam_img:
-                                    st.session_state.img_marcada = sam_img
-                                    st.session_state.sam_metrics = {'Area_PX': area_px}
-                                    sam_utilizado = True
-                                    txt_docs += f"\n[TELEMETRÍA MOBILE SAM]\n- Área de lesión aislada: {area_px} píxeles (usa esto para evaluar extensión relativa).\n"
-                            
                             if "ECG" in modo:
                                 img_aislada = aislar_trazado_ecg(i_pil)
                                 con.extend([i_pil, img_aislada])
@@ -481,16 +444,11 @@ with col_center:
                             
                             if not imagen_para_visor: imagen_para_visor = i_pil
 
-                # --- REGLAS BLINDADAS ---
-                # Si MobileSAM ya dibujó la máscara, le prohibimos a Gemini dibujar cajas encima.
-                if sam_utilizado:
-                    instruccion_bbox = "INSTRUCCIÓN: La imagen ya ha sido segmentada de forma milimétrica por MobileSAM. NO devuelvas BBOX ni intentes marcar coordenadas sobre ella, céntrate en el diagnóstico."
-                else:
-                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA DE VISIÓN ESPACIAL: Si detectas patología, lesión o anomalía, DEBES imprimir sus coordenadas. Usa EXACTAMENTE este formato literal: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto. (Ejemplo que debes imitar: BBOX: [150, 200, 450, 600] LABEL: Fractura falange)."
+                instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA DE VISIÓN ESPACIAL: Si detectas patología, lesión o anomalía en la imagen, DEBES imprimir obligatoriamente sus coordenadas usando una escala matemática de 0 a 1000. Usa EXACTAMENTE este formato literal: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto. (Ejemplo que debes imitar: BBOX: [150, 200, 450, 600] LABEL: Fractura falange)."
                 
                 if modo == "✨ Autodetectar":
                     titulo_caja = "🛠️ DIAGNÓSTICO Y PLAN DE ACCIÓN"
-                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión, etc.). Asume el rol del médico hiper-especialista en esa área.'
+                    instruccion_modo = 'Identifica visualmente de qué tipo de imagen médica se trata (ECG, Radiografía, Herida, Lesión dermatológica, etc.). Asume automáticamente el rol del médico hiper-especialista en esa área exacta.'
                 elif "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
@@ -517,11 +475,11 @@ with col_center:
                 Docs/Datos: {txt_docs[:10000]}
                 
                 REGLAS:
-                1. EMPIEZA DIRECTAMENTE con <details>. Cero saludos.
+                1. EMPIEZA DIRECTAMENTE con <details>. Cero saludos o muletillas introductorias.
                 2. {instruccion_modo}
                 3. {instruccion_anatomia}
                 4. {instruccion_bbox}
-                5. Omite datos faltantes.
+                5. Omite datos faltantes (no digas que faltan datos, analiza lo que tienes).
                 6. DIAGNÓSTICO EN NEGRITA: En la primera frase usa <b>...</b>.
 
                 FORMATO HTML REQUERIDO:
@@ -529,19 +487,25 @@ with col_center:
                 <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Explicación de manejo clínico]</p></details>
                 <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>{titulo_caja}</summary><p>[Desarrollo o Bibliografía]</p></details>{caja_enfermeria}
                 """
-
-                resp = model.generate_content([prompt, *con] if con else prompt)
+                
+                # --- AQUÍ APAGAMOS LOS FILTROS DE SEGURIDAD DE GOOGLE ---
+                resp = model.generate_content(
+                    [prompt, *con] if con else prompt,
+                    safety_settings=MEDICAL_SAFETY_SETTINGS
+                )
+                
                 texto_generado = resp.text[resp.text.find("<details"):] if "<details" in resp.text else resp.text
 
-                if imagen_para_visor and not sam_utilizado:
+                if imagen_para_visor:
                     img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_para_visor)
-                    if detectado: st.session_state.img_marcada = img_marcada
-                    elif not st.session_state.img_marcada: st.session_state.img_marcada = imagen_para_visor
+                    st.session_state.img_marcada = img_marcada if detectado else imagen_para_visor
 
                 st.session_state.resultado_analisis = texto_generado.strip()
                 st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
 
-            except Exception as e: st.error(f"Error: {e}")
+            except Exception as e: 
+                # Este es el bloque que lanzaba el error rojo en tu pantalla
+                st.error(f"Error procesando el análisis: {e}")
 
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
@@ -556,7 +520,6 @@ with col_center:
 with col_right:
     visor_abierto = True if (st.session_state.get("img_marcada") or st.session_state.get("video_bytes")) else False
     with st.expander("👁️ Visor Visual / IA", expanded=visor_abierto):
-        # Muestra métricas de Ecografía si las hay
         metrics = st.session_state.get("pocus_metrics", {})
         if metrics:
             st.markdown("### 🧮 Telemetría POCUS (V6)")
@@ -565,18 +528,19 @@ with col_right:
             c2.metric("FC", f"{metrics.get('BPM', 'N/A')} bpm")
             c3.metric("Ritmo", metrics.get('Ritmo', 'N/A'))
             st.divider()
-            
-        # Muestra métricas de SAM si las hay
-        s_metrics = st.session_state.get("sam_metrics", {})
-        if s_metrics:
-            st.markdown("### 🦠 Segmentación MobileSAM")
-            st.metric("Área de Lesión Aislada", f"{s_metrics.get('Area_PX', 0)} px")
+            c4, c5 = st.columns(2)
+            c4.metric("Strain T. (Proxy)", f"{metrics.get('Strain_Proxy', 'N/A')}")
+            c5.metric("Colapso VCI (Proxy)", f"{metrics.get('Colapso_VCI', 'N/A')}%")
+            st.divider()
+            c6, c7 = st.columns(2)
+            c6.metric("Líneas B", "⚠️ Detectadas" if metrics.get('B_Lines') else "✅ Negativo")
+            c7.metric("Derrame", "⚠️ Sí" if metrics.get('Derrame') else "✅ No")
             st.divider()
 
         if st.session_state.get("video_bytes"): st.video(st.session_state.video_bytes)
         
         if st.session_state.get("img_marcada"):
-            st.markdown("#### 🎯 Visión / Segmentación IA")
+            st.markdown("#### 🎯 Visión / Detección IA")
             st.image(st.session_state.img_marcada, use_container_width=True)
         elif not st.session_state.get("video_bytes"):
             st.caption("Aquí aparecerá la imagen o el análisis visual.")
@@ -591,6 +555,14 @@ if st.session_state.resultado_analisis:
             genai.configure(api_key=st.session_state.api_key)
             chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
             ctx_chat = f"Eres el médico experto de guardia. Has generado este informe:\n{st.session_state.resultado_analisis}\nResponde a la duda:\n{user_query}"
-            st.session_state.chat_messages.append({"role": "assistant", "content": chat_model.generate_content(ctx_chat).text})
-        except Exception as e: st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error: {e}"})
+            
+            # --- APAGAMOS FILTROS TAMBIÉN EN EL CHAT ---
+            respuesta_ia = chat_model.generate_content(
+                ctx_chat, 
+                safety_settings=MEDICAL_SAFETY_SETTINGS
+            )
+            st.session_state.chat_messages.append({"role": "assistant", "content": respuesta_ia.text})
+            
+        except Exception as e: 
+            st.session_state.chat_messages.append({"role": "assistant", "content": f"⚠️ Error bloqueado por seguridad: {e}"})
         st.rerun()
