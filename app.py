@@ -303,7 +303,7 @@ with col_center:
                     imagen_dibujada = Image.alpha_composite(img_pil_original.convert('RGBA'), mask).convert('RGB')
                     st.success("✅ Dibujo fusionado con éxito en alta resolución.")
             
-        notas = st.text_area("Notas / Preguntas específicas:", height=60, placeholder="Ej: Analiza la zona que he rodeado en verde...")
+        notas = st.text_area("Notas / Preguntas específicas:", height=70, placeholder="Ej: Analiza la zona que he rodeado en verde...")
         
         # --- AUDIO INTACTO ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
