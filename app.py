@@ -13,31 +13,24 @@ import numpy as np
 import extra_streamlit_components as stx
 import pandas as pd
 import uuid
-from streamlit_drawable_canvas import st_canvas
-import urllib.request
-import json
-import xml.etree.ElementTree as ET
 
-# --- PARCHE DE EMERGENCIA PARA STREAMLIT 1.40+ vs CANVAS ---
-# Inyectamos la función faltante para que el fondo del ECG no salga en blanco
-import streamlit.elements.image as st_image
-if not hasattr(st_image, 'image_to_url'):
-    def patched_image_to_url(image, *args, **kwargs):
-        import base64
-        from io import BytesIO
-        from PIL import Image
-        buffered = BytesIO()
-        if isinstance(image, Image.Image):
-            image.save(buffered, format="PNG")
-        else:
-            Image.fromarray(image).save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        return f"data:image/png;base64,{img_str}"
-    st_image.image_to_url = patched_image_to_url
-# -----------------------------------------------------------
+# --- PARCHE NUCLEAR BASE64 PARA LA PIZARRA ---
+# Forzamos a la pizarra a tragarse la imagen saltándonos la seguridad de Streamlit 1.40
+import streamlit_drawable_canvas
+def patched_image_to_url(image, *args, **kwargs):
+    import base64
+    from io import BytesIO
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
+streamlit_drawable_canvas.image_to_url = patched_image_to_url
+from streamlit_drawable_canvas import st_canvas
+# ----------------------------------------------
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 96.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 97.0 (Canvas Final)", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -231,7 +224,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 96.0")
+st.title("🩺 LabMind 97.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -268,7 +261,7 @@ with col_center:
                 if "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
         
-        # --- PIZARRA INTERACTIVA RESCATADA ---
+        # --- PIZARRA INTERACTIVA CON PARCHE BASE64 ---
         imagen_dibujada = None
         if archivos and any(t == "img" for t, _ in archivos):
             img_file = next(f for t, f in archivos if t == "img")
@@ -281,13 +274,11 @@ with col_center:
             if habilitar_dibujo:
                 st.caption("Usa el dedo para marcar la anomalía.")
                 
-                # Ancho adaptado al iPhone mini
                 w_canvas = 350
                 h_canvas = int(w_canvas * img_pil_original.height / img_pil_original.width)
                 
-                # Limpiar la imagen completamente para evitar advertencias de Pillow
-                data_img = np.array(img_pil_original.resize((w_canvas, h_canvas)))
-                img_fondo_limpia = Image.fromarray(data_img)
+                img_fondo_canvas = img_pil_original.resize((w_canvas, h_canvas))
+                img_fondo_limpia = Image.fromarray(np.array(img_fondo_canvas).astype('uint8'), 'RGB')
                 
                 canvas_result = st_canvas(
                     fill_color="rgba(255, 0, 0, 0.0)", 
@@ -305,7 +296,6 @@ with col_center:
             
         notas = st.text_area("Notas / Preguntas específicas:", height=70, placeholder="Ej: Analiza la zona que he rodeado en verde...")
         
-        # --- AUDIO INTACTO ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
             if hasattr(st, "audio_input"):
                 audio_val = st.audio_input("Dictar notas", key="mic", label_visibility="collapsed")
@@ -376,7 +366,7 @@ with col_center:
                     instruccion_modo = 'Analiza el caso clínico proporcionado.'
 
                 prompt = f"""
-                Rol: Médico Especialista IA V96. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V97. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
