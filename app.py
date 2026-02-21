@@ -237,7 +237,7 @@ with col_center:
                 else: archivos.append(("img", f))
             
         # --- NOTAS PLEGADAS ---
-        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
+        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed", placeholder="Describe qué quieres que la IA observe en las imágenes...")
         
         # --- AUDIO BLINDADO ---
