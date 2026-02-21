@@ -18,7 +18,7 @@ import json
 import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 98.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 99.1", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -161,31 +161,6 @@ def extraer_y_dibujar_bboxes(texto, img_pil=None):
     texto_limpio = re.sub(patron, '', texto)
     return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)), texto_limpio.strip(), True
 
-def aislar_herida_nucleo(img_bgr):
-    try:
-        from ultralytics import SAM
-        h, w = img_bgr.shape[:2]
-        max_dim = 640
-        scale = min(max_dim/w, max_dim/h)
-        if scale < 1:
-            new_w, new_h = int(w * scale), int(h * scale)
-            img_resized = cv2.resize(img_bgr, (new_w, new_h))
-        else:
-            img_resized = img_bgr
-            new_w, new_h = w, h
-
-        model = SAM("mobile_sam.pt")
-        resultados = model(img_resized, points=[[new_w // 2, new_h // 2]], labels=[1], device="cpu", verbose=False)
-        
-        if resultados and len(resultados) > 0 and resultados[0].masks is not None:
-            mask_small = resultados[0].masks.data[0].cpu().numpy()
-            mask_small = (mask_small * 255).astype(np.uint8)
-            mask_full = cv2.resize(mask_small, (w, h), interpolation=cv2.INTER_NEAREST)
-            return mask_full, "DL (MobileSAM)"
-        else: return None, "CV2 (Mascara vacia)"
-    except Exception as e:
-        return None, "CV2 (Fallback RAM)"
-
 def create_pdf(texto_analisis):
     class PDF(FPDF):
         def header(self): 
@@ -212,7 +187,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 98.0 (Estable)")
+st.title("🩺 LabMind 99.1")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -225,7 +200,16 @@ with col_left:
         except: st.session_state.modelos_disponibles = ["gemini-1.5-pro"]
 
     lista_para_mostrar = st.session_state.modelos_disponibles if st.session_state.modelos_disponibles else ["Inicia sesión..."]
-    st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", lista_para_mostrar)
+    
+    # BÚSQUEDA DEL MODELO POR DEFECTO (Fijado estrictamente a Gemini 3 Flash Preview)
+    idx_defecto = 0
+    for i, modelo in enumerate(lista_para_mostrar):
+        nombre_modelo = modelo.lower()
+        if "3" in nombre_modelo and "flash" in nombre_modelo and "preview" in nombre_modelo:
+            idx_defecto = i
+            break
+
+    st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", lista_para_mostrar, index=idx_defecto)
     st.session_state.punto_cuerpo = st.selectbox("Zona anatómica:", ["No especificada", "Cara", "Pecho", "Abdomen", "Sacro/Glúteo", "Pierna", "Talón", "Pie"])
 
 with col_center:
@@ -240,7 +224,9 @@ with col_center:
     if modo == "📚 Agente Investigador (PubMed)":
         st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU.")
         query_pubmed = st.text_input("🔍 ¿Qué duda clínica quieres investigar en PubMed?", placeholder="Ej: Effectiveness of honey dressings for diabetic foot ulcers")
-        notas = st.text_area("Contexto de tu paciente (opcional):", placeholder="Paciente de 70 años con DM2...")
+        
+        with st.expander("📝 Notas Clínicas / Contexto (Opcional)", expanded=False):
+            notas = st.text_area("Contexto", height=70, label_visibility="collapsed", placeholder="Ej: Paciente de 70 años con DM2...")
     
     else:
         fs = st.file_uploader("Subir Archivos Clínicos", type=['jpg','png','pdf'], accept_multiple_files=True)
@@ -249,7 +235,9 @@ with col_center:
                 if "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
             
-        notas = st.text_area("Notas / Preguntas específicas:", height=70, placeholder="Describe qué quieres que la IA observe en las imágenes...")
+        # --- NOTAS PLEGADAS ---
+        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
+            notas = st.text_area("Notas", height=70, label_visibility="collapsed", placeholder="Describe qué quieres que la IA observe en las imágenes...")
         
         # --- AUDIO BLINDADO ---
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
@@ -316,8 +304,15 @@ with col_center:
                     titulo_caja = "🛠️ PLAN DE ACCIÓN"
                     instruccion_modo = 'Analiza el caso clínico proporcionado.'
 
+                # --- LÓGICA DE CUIDADOS DE ENFERMERÍA DINÁMICA ---
+                instruccion_enfermeria = ""
+                caja_enfermeria = ""
+                if contexto in ["Hospitalización", "Urgencias", "UCI"]:
+                    instruccion_enfermeria = "5. CUIDADOS DE ENFERMERÍA: Obligatorio incluir la caja de Cuidados de Enfermería con pautas de monitorización y manejo propias de enfermería."
+                    caja_enfermeria = '\n<div class="pocus-box"><b>👩‍⚕️ CUIDADOS DE ENFERMERÍA:</b><br>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</div>'
+
                 prompt = f"""
-                Rol: Médico Especialista IA V98. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V99.1. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
@@ -326,11 +321,13 @@ with col_center:
                 2. {instruccion_modo}
                 3. {instruccion_bbox}
                 4. REGLA DE OMISIÓN: Si faltan datos de laboratorio o analíticas, NO menciones que faltan. Ignóralo.
+                {instruccion_enfermeria}
+                6. DIAGNÓSTICO EN NEGRITA: En la caja de HALLAZGOS PRINCIPALES, tu primera frase (el diagnóstico principal o conclusión) DEBE IR OBLIGATORIAMENTE en **negrita**.
 
                 FORMATO HTML REQUERIDO:
-                <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[Descripción clínica]</div>
+                <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[**Frase principal en negrita**. Resto de la descripción clínica]</div>
                 <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Explicación]</div>
-                <div class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}"><b>{titulo_caja}:</b><br>[Desarrollo / Bibliografía referenciada con PMIDs]</div>
+                <div class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}"><b>{titulo_caja}:</b><br>[Desarrollo / Bibliografía referenciada con PMIDs]</div>{caja_enfermeria}
                 """
 
                 resp = model.generate_content([prompt, *con] if con else prompt)
