@@ -1,4 +1,4 @@
-streamlit==1.40.0
+streamlit>=1.40.0
 google-generativeai>=0.7.0
 Pillow
 pypdf
@@ -8,7 +8,6 @@ numpy
 pandas
 extra-streamlit-components
 ultralytics
-streamlit-drawable-canvas==0.9.3
 
 
 
