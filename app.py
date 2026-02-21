@@ -19,7 +19,7 @@ import json
 import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 94.1", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 94.2", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -213,7 +213,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 94.1")
+st.title("🩺 LabMind 94.2")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -236,6 +236,7 @@ with col_center:
     contexto = st.selectbox("🏥 Contexto:", ["Hospitalización", "Residencia", "Urgencias", "UCI", "Domicilio"])
     
     archivos = []; con_final_dibujo = []
+    audio_val = None # Inicializamos vacío
     
     if modo == "📚 Agente Investigador (PubMed)":
         st.info("🤖 **Agente Activo:** Conectado a la API oficial de la Biblioteca Nacional de Medicina de EE. UU. Buscará literatura científica real y generará un informe citado.")
@@ -277,6 +278,10 @@ with col_center:
                     st.success("✅ Dibujo fusionado con la imagen. La IA lo verá.")
             
         notas = st.text_area("Notas / Preguntas específicas:", height=60, placeholder="Ej: Analiza la zona que he rodeado en verde...")
+        
+        # --- AUDIO COMPACTO (Acordeón) ---
+        with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
+            audio_val = st.audio_input("Dictar notas", key="audio_recorder", label_visibility="collapsed")
 
     col_btn1, col_btn2 = st.columns([3, 1])
     with col_btn1: btn_analizar = st.button("🚀 ANALIZAR / INVESTIGAR", type="primary", use_container_width=True)
@@ -300,6 +305,15 @@ with col_center:
                 
                 imagen_para_visor = None
                 if modo != "📚 Agente Investigador (PubMed)":
+                    
+                    # Cargar Audio a Gemini
+                    if audio_val:
+                        st.toast("🎙️ Procesando audio...")
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tf_audio:
+                            tf_audio.write(audio_val.read())
+                            ap = tf_audio.name
+                        con.append(genai.upload_file(path=ap))
+                        
                     for tipo, file in archivos:
                         if tipo == "doc":
                             file.seek(0) # REBOBINADO DE SEGURIDAD
