@@ -18,7 +18,7 @@ import json
 import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 100.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -188,7 +188,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 100.0")
+st.title("🩺 LabMind")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -237,7 +237,7 @@ with col_center:
                 else: archivos.append(("img", f))
             
         # --- NOTAS PLEGADAS ---
-        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
+        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
             notas = st.text_area("Notas", height=70, label_visibility="collapsed", placeholder="Describe qué quieres que la IA observe en las imágenes...")
         
         # --- AUDIO BLINDADO ---
@@ -293,7 +293,7 @@ with col_center:
                                 con.append(i_pil)
                                 if not imagen_para_visor: imagen_para_visor = i_pil
 
-                # --- NUEVA LÓGICA DE DIBUJO (BBOX) EXTENDIDA ---
+                # --- LÓGICA DE DIBUJO (BBOX) EXTENDIDA ---
                 instruccion_bbox = ""
                 if "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
@@ -319,7 +319,7 @@ with col_center:
                     caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</p></details>'
 
                 prompt = f"""
-                Rol: Médico Especialista IA V100.0. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
@@ -360,7 +360,10 @@ with col_center:
             st.download_button("📥 Descargar Informe PDF", st.session_state.pdf_bytes, "informe.pdf")
 
 with col_right:
-    with st.expander("👁️ Visor Visual / IA", expanded=True):
+    # --- APERTURA INTELIGENTE DEL VISOR ---
+    visor_abierto = True if st.session_state.get("img_marcada") else False
+    
+    with st.expander("👁️ Visor Visual / IA", expanded=visor_abierto):
         if st.session_state.get("img_marcada"):
             st.markdown("#### 🎯 Detección IA")
             st.image(st.session_state.img_marcada, use_container_width=True)
