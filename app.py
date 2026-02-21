@@ -18,7 +18,7 @@ import json
 import xml.etree.ElementTree as ET
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="LabMind 99.1", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="LabMind 100.0", page_icon="🧬", layout="wide")
 
 # --- ESTILOS CSS ---
 st.markdown("""
@@ -33,21 +33,22 @@ st.markdown("""
         background-color: #2e7d32 !important; color: white !important; border: none !important;
     }
     
-    .cot-box { background-color: #f8f9fa; border: 1px dashed #6c757d; border-left: 5px solid #343a40; padding: 12px; border-radius: 5px; margin-bottom: 15px; font-family: monospace; font-size: 0.85rem; color: #495057; }
-    .diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #0d47a1; font-family: sans-serif; }
-    .action-box { background-color: #ffebee; border-left: 6px solid #f44336; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #b71c1c; font-family: sans-serif; }
-    .material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; padding: 15px; border-radius: 8px; margin-bottom: 15px; color: #1b5e20; font-family: sans-serif; }
-    .radiomics-box { background-color: #f3e5f5; border-left: 6px solid #9c27b0; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #4a148c; font-family: sans-serif; }
-    .pocus-box { background-color: #e0f2f1; border-left: 6px solid #00897b; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #004d40; font-family: sans-serif; }
-    .longevity-box { background-color: #fff8e1; border-left: 6px solid #ffc107; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #ff6f00; font-family: sans-serif; }
-    .pubmed-box { background-color: #e8eaf6; border-left: 6px solid #3f51b5; padding: 15px; border-radius: 8px; margin-bottom: 10px; color: #1a237e; font-family: sans-serif; }
+    /* ESTILOS PARA TARJETAS PLEGABLES (DETAILS/SUMMARY) */
+    details { padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+    summary { cursor: pointer; font-size: 1.05rem; outline: none; font-weight: bold; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    details > summary::before { content: '🔽 '; font-size: 0.9em; }
+    details[open] > summary::before { content: '🔼 '; }
+    details[open] summary { border-bottom: 1px dashed currentcolor; padding-bottom: 8px; margin-bottom: 8px; }
+    details p { margin-top: 5px; margin-bottom: 0; line-height: 1.5; }
     
-    .tissue-labels { display: flex; width: 100%; margin-bottom: 2px; }
-    .tissue-label-text { font-size: 0.75rem; text-align: center; font-weight: bold; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tissue-bar-container { display: flex; width: 100%; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .tissue-gran { background-color: #ef5350; height: 100%; }
-    .tissue-slough { background-color: #fdd835; height: 100%; }
-    .tissue-nec { background-color: #212121; height: 100%; }
+    details.diagnosis-box { background-color: #e3f2fd; border-left: 6px solid #2196f3; color: #0d47a1; }
+    details.action-box { background-color: #ffebee; border-left: 6px solid #f44336; color: #b71c1c; }
+    details.material-box { background-color: #e8f5e9; border-left: 6px solid #4caf50; color: #1b5e20; }
+    details.radiomics-box { background-color: #f3e5f5; border-left: 6px solid #9c27b0; color: #4a148c; }
+    details.pocus-box { background-color: #e0f2f1; border-left: 6px solid #00897b; color: #004d40; }
+    details.longevity-box { background-color: #fff8e1; border-left: 6px solid #ffc107; color: #ff6f00; }
+    details.pubmed-box { background-color: #e8eaf6; border-left: 6px solid #3f51b5; color: #1a237e; }
     
     .pull-up { margin-top: -25px !important; margin-bottom: 5px !important; height: 1px !important; display: block !important; }
 </style>
@@ -187,7 +188,7 @@ def create_pdf(texto_analisis):
 #      INTERFAZ DE USUARIO
 # ==========================================
 
-st.title("🩺 LabMind 99.1")
+st.title("🩺 LabMind 100.0")
 col_left, col_center, col_right = st.columns([1, 2, 1])
 
 with col_left:
@@ -292,11 +293,17 @@ with col_center:
                                 con.append(i_pil)
                                 if not imagen_para_visor: imagen_para_visor = i_pil
 
+                # --- NUEVA LÓGICA DE DIBUJO (BBOX) EXTENDIDA ---
                 instruccion_bbox = ""
                 if "ECG" in modo:
                     titulo_caja = "💡 LECTURA ECG Y MANEJO"
                     instruccion_modo = 'ERES UN CARDIÓLOGO CLÍNICO. Analiza ritmo, eje, ondas y segmentos.'
                     instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas isquemia (ej. elevación/descenso ST), arritmia grave o bloqueo, ES VITAL que devuelvas exactamente esta etiqueta indicando dónde está: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Patología. Escala de 0 a 1000."
+                elif modo in ["🧴 Dermatología", "💀 RX/TAC/Resonancia", "🩹 Heridas / Úlceras"]:
+                    titulo_caja = "🛠️ PLAN DE ACCIÓN"
+                    instruccion_modo = 'Analiza el caso clínico y la imagen proporcionada.'
+                    # Ahora tiene orden expresa de dibujar en Dermatología y RX
+                    instruccion_bbox = "INSTRUCCIÓN OBLIGATORIA: Si detectas una lesión (ej. carcinoma, úlcera), fractura, o patología focal en la imagen, ES VITAL que devuelvas exactamente esta etiqueta indicando sus coordenadas: BBOX: [ymin, xmin, ymax, xmax] LABEL: Nombre Lesión. Escala de 0 a 1000."
                 elif modo == "📚 Agente Investigador (PubMed)":
                     titulo_caja = "📚 CONCLUSIÓN BASADA EN EVIDENCIA"
                     instruccion_modo = f'Actúas como un investigador académico. He buscado en PubMed los abstracts de los artículos más recientes sobre la consulta del usuario. Tu trabajo es leerlos y redactar un informe clínico riguroso.\n\nEVIDENCIA EXTRAÍDA DE PUBMED:\n{datos_pubmed}'
@@ -309,32 +316,33 @@ with col_center:
                 caja_enfermeria = ""
                 if contexto in ["Hospitalización", "Urgencias", "UCI"]:
                     instruccion_enfermeria = "5. CUIDADOS DE ENFERMERÍA: Obligatorio incluir la caja de Cuidados de Enfermería con pautas de monitorización y manejo propias de enfermería."
-                    caja_enfermeria = '\n<div class="pocus-box"><b>👩‍⚕️ CUIDADOS DE ENFERMERÍA:</b><br>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</div>'
+                    caja_enfermeria = '\n<details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Escribe aquí las intervenciones, monitorización y cuidados específicos]</p></details>'
 
                 prompt = f"""
-                Rol: Médico Especialista IA V99.1. Contexto: {contexto}. Modo: {modo}.
+                Rol: Médico Especialista IA V100.0. Contexto: {contexto}. Modo: {modo}.
                 Pregunta del usuario: "{notas}"
                 Docs: {txt_docs[:10000]}
                 
                 INSTRUCCIONES CRÍTICAS:
-                1. MÁXIMA ESTRICTEZ: PROHIBIDO escribir texto gris o saludos fuera de las cajas HTML. Tu respuesta debe empezar directamente con la primera caja <div class="diagnosis-box">.
+                1. MÁXIMA ESTRICTEZ: PROHIBIDO escribir texto gris o saludos fuera de las cajas HTML. Tu respuesta debe empezar directamente con la primera caja <details>.
                 2. {instruccion_modo}
                 3. {instruccion_bbox}
                 4. REGLA DE OMISIÓN: Si faltan datos de laboratorio o analíticas, NO menciones que faltan. Ignóralo.
                 {instruccion_enfermeria}
-                6. DIAGNÓSTICO EN NEGRITA: En la caja de HALLAZGOS PRINCIPALES, tu primera frase (el diagnóstico principal o conclusión) DEBE IR OBLIGATORIAMENTE en **negrita**.
+                6. DIAGNÓSTICO EN NEGRITA: En la primera frase de HALLAZGOS PRINCIPALES, usa la etiqueta HTML <b>...</b> para resaltarla en negrita.
 
-                FORMATO HTML REQUERIDO:
-                <div class="diagnosis-box"><b>🚨 HALLAZGOS PRINCIPALES:</b><br>[**Frase principal en negrita**. Resto de la descripción clínica]</div>
-                <div class="action-box"><b>⚡ ACCIÓN INMEDIATA:</b><br>[Explicación]</div>
-                <div class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}"><b>{titulo_caja}:</b><br>[Desarrollo / Bibliografía referenciada con PMIDs]</div>{caja_enfermeria}
+                FORMATO HTML REQUERIDO (Usa las etiquetas <details> y <summary> tal cual te las pongo):
+                <details class="diagnosis-box" open><summary>🚨 HALLAZGOS PRINCIPALES</summary><p><b>[Frase principal del diagnóstico aquí]</b>. [Resto de la descripción clínica]</p></details>
+                <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Explicación y Riesgos]</p></details>
+                <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>{titulo_caja}</summary><p>[Desarrollo o Bibliografía]</p></details>{caja_enfermeria}
                 """
 
                 resp = model.generate_content([prompt, *con] if con else prompt)
                 texto_generado = resp.text
 
-                if "<div" in texto_generado:
-                    texto_generado = texto_generado[texto_generado.find("<div"):]
+                # Filtro guillotina para el nuevo formato details
+                if "<details" in texto_generado:
+                    texto_generado = texto_generado[texto_generado.find("<details"):]
 
                 if imagen_para_visor:
                     img_marcada, texto_generado, detectado = extraer_y_dibujar_bboxes(texto_generado, imagen_para_visor)
