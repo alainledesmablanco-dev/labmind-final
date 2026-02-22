@@ -351,7 +351,7 @@ with col_c:
         "🦇 Ecografía / POCUS", 
         "📚 Agente Investigador (PubMed)", 
         "📈 ECG", 
-        "💀 RX/TAC/RMN", 
+        "💀 RX/TAC", 
         "🧴 Dermatología"
     ]
     modo = st.selectbox("Especialidad:", lista_modos)
@@ -377,7 +377,7 @@ with col_c:
         
         if metodo_captura == "📁 Subir Archivos":
             fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
-            
+            st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
         elif metodo_captura == "📸 Tomar Foto":
             cam_pic = st.camera_input("Cámara")
             
@@ -419,7 +419,7 @@ with col_c:
         st.session_state.sam_metrics = {}
         st.session_state.chat_messages = []
         
-        with st.spinner("Procesando datos (Verificación cruzada activada)..."):
+        with st.spinner("IA #1: Procesando datos y generando informe preliminar..."):
             try:
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
                 con = []
@@ -619,45 +619,71 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 </details>
 """
 
-                # --- FIX V147: DIRECTRIZ SUPREMA (CADENA DE VERIFICACIÓN) ---
-                prompt = f"""
-                DIRECTRIZ SUPREMA (PROTOCOLOS DE SEGURIDAD DEL PACIENTE):
-                Eres LabMind, una IA de grado médico estricto. Tu prioridad absoluta es NO INVENTAR DATOS (Cero Alucinaciones). Eres un auditor clínico implacable.
+                # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO) ---
+                prompt_adjunto = f"""
+                DIRECTRIZ SUPREMA: Eres LabMind, una IA de grado médico estricto. NO INVENTES DATOS.
 
                 Contexto: {contexto}. Especialidad: {modo}.
                 Usuario (Notas): "{notas}"
                 Datos Aportados: {txt_docs[:15000]}
 
                 CADENA DE VERIFICACIÓN OBLIGATORIA (CoVe):
-                Antes de escribir tu respuesta final, debes procesar mentalmente estos pasos:
                 1. Analizar evidencias.
                 2. Formular hipótesis.
-                3. AUTOCRÍTICA DE RED TEAM: Cuestiona tu propia hipótesis. ¿Faltan datos? ¿La imagen es borrosa? ¿Asumiste un valor no escrito?
-                4. CÁLCULO DE CERTEZA: Asigna un porcentaje real de fiabilidad a tu respuesta (0% a 100%). Si la imagen es mala o faltan datos, el porcentaje debe ser inferior al 50%.
+                3. AUTOCRÍTICA: Cuestiona tu hipótesis. ¿Faltan datos? 
+                4. CÁLCULO DE CERTEZA: Asigna un porcentaje real de fiabilidad a tu respuesta (0% a 100%).
                 
-                REGLAS EXTRA (SEGURIDAD MÁXIMA):
+                REGLAS EXTRA:
                 - {instruccion_bbox}
                 - {instruccion_anatomia}
-                - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente o emitir juicios, básate ÚNICA Y EXCLUSIVAMENTE en los Datos, Imágenes y Notas aportadas.
-                - CLÁUSULA DE IGNORANCIA: Si la imagen es borrosa o los datos son insuficientes para una conclusión segura, dilo explícitamente y baja tu % de Certeza. NO inventes hallazgos.
+                - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente, básate ÚNICA Y EXCLUSIVAMENTE en los Datos aportados.
+                - CLÁUSULA DE IGNORANCIA: Si la imagen o los datos son insuficientes, dilo explícitamente y baja tu % de Certeza.
                 {instrucciones_especificas}
 
-                INSTRUCCIÓN DE FORMATO MUY ESTRICTA:
-                Debes responder ÚNICA y EXCLUSIVAMENTE copiando el siguiente bloque HTML y rellenando los corchetes. Reemplaza [Certeza: XX%] por tu cálculo numérico. NO uses Markdown como ```html. 
-
+                FORMATO HTML OBLIGATORIO (Rellena los corchetes sin usar ```html):
                 {html_requerido}
                 """
                 
-                # --- FIX V147: TEMPERATURA 0.0 PARA RESPUESTAS DETERMINISTAS MATEMÁTICAS ---
-                res = model.generate_content(
-                    [prompt, *con] if con else prompt, 
+                # EJECUCIÓN AGENTE 1
+                res_adjunto = model.generate_content(
+                    [prompt_adjunto, *con] if con else prompt_adjunto, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
                     generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
                 )
                 
-                raw_txt = res.text.replace("```html", "").replace("```", "").strip()
-                raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
+                raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
+                raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
+
+                # --- FIX V148: PROMPT AGENTE 2 (JEFE DE SERVICIO / AUDITOR) ---
+                st.toast("🕵️‍♂️ IA #2: Auditoría clínica en curso (Verificando alucinaciones)...")
                 
+                prompt_auditor = f"""
+                Eres el JEFE DE SERVICIO MÉDICO (Auditor de Calidad y Seguridad del Paciente).
+                Un médico adjunto (IA) ha generado este informe preliminar basándose en las pruebas adjuntas:
+
+                INFORME PRELIMINAR A EVALUAR:
+                {raw_txt_inicial}
+
+                TU MISIÓN:
+                1. Revisa rigurosamente el Informe Preliminar comparándolo con las imágenes, audios o textos aportados.
+                2. Busca errores mortales, alucinaciones (cosas inventadas que no están en las pruebas) o asunciones sin base.
+                3. Si detectas un error grave: CORRIGE el texto manteniendo el mismo formato HTML de tarjetas, baja el % de certeza y añade una advertencia clínica.
+                4. Si el informe preliminar es CORRECTO y SEGURO: Devuélvelo EXACTAMENTE igual, pero añade en la primera tarjeta, justo después del diagnóstico, esta etiqueta: "✅ <b>[Verificado por IA Auditora]</b>".
+                
+                IMPORTANTE: Responde ÚNICAMENTE con el código HTML final. No añadas introducciones ni saludos.
+                """
+                
+                # EJECUCIÓN AGENTE 2
+                res_auditor = model.generate_content(
+                    [prompt_auditor, *con] if con else prompt_auditor, 
+                    safety_settings=MEDICAL_SAFETY_SETTINGS,
+                    generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
+                )
+                
+                raw_txt = res_auditor.text.replace("```html", "").replace("```", "").strip()
+                raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
+
+                # --- EXTRACCIÓN DE FOTOGRAMAS Y BBOX (Mantenido) ---
                 img_base_para_bbox = imagen_para_visor
                 
                 if video_presente and st.session_state.get("last_video_path") and "FRAME:" in raw_txt:
