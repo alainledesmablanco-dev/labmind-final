@@ -64,7 +64,7 @@ MEDICAL_SAFETY_SETTINGS = [
 cookie_manager = stx.CookieManager()
 time.sleep(0.1)
 
-for key in ["autenticado", "api_key", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "last_video_path"]:
+for key in ["autenticado", "api_key", "api_key_claude", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "last_video_path"]:
     if key not in st.session_state: st.session_state[key] = [] if key in ["chat_messages", "modelos_disponibles"] else None
 if "autenticado" not in st.session_state or not st.session_state.autenticado:
     st.session_state.autenticado = False
@@ -72,16 +72,31 @@ if "pocus_metrics" not in st.session_state: st.session_state.pocus_metrics = {}
 if "sam_metrics" not in st.session_state: st.session_state.sam_metrics = {}
 
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
+cookie_api_key_claude = cookie_manager.get(cookie="labmind_claude_key")
+
 if not st.session_state.autenticado:
     if cookie_api_key:
-        st.session_state.api_key = cookie_api_key; st.session_state.autenticado = True; st.rerun()
+        st.session_state.api_key = cookie_api_key
+        if cookie_api_key_claude:
+            st.session_state.api_key_claude = cookie_api_key_claude
+        st.session_state.autenticado = True
+        st.rerun()
     else:
         st.title("LabMind Acceso")
-        k = st.text_input("API Key:", type="password")
+        k = st.text_input("API Key Google (Gemini) [Obligatorio]:", type="password")
+        k_claude = st.text_input("API Key Anthropic (Claude) [Opcional para Doble IA]:", type="password")
         if st.button("Entrar", type="primary"):
-            expires = datetime.datetime.now() + datetime.timedelta(days=30)
-            cookie_manager.set("labmind_secret_key", k, expires_at=expires)
-            st.session_state.api_key = k; st.session_state.autenticado = True; st.rerun()
+            if k:
+                expires = datetime.datetime.now() + datetime.timedelta(days=30)
+                cookie_manager.set("labmind_secret_key", k, expires_at=expires)
+                st.session_state.api_key = k
+                if k_claude:
+                    cookie_manager.set("labmind_claude_key", k_claude, expires_at=expires)
+                    st.session_state.api_key_claude = k_claude
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("La API Key de Google es obligatoria.")
         st.stop()
 
 # ==========================================
@@ -334,6 +349,11 @@ with col_l:
                 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", st.session_state.modelos_disponibles, index=idx_defecto)
     
+    if st.session_state.get("api_key_claude"):
+        st.success("✅ Claude 3.5 enlazado como Auditor")
+    else:
+        st.info("ℹ️ Gemini auditará sus propias respuestas.")
+        
     lista_anatomia = [
         "✨ Autodetectar", "Cabeza", "Cara", "Cuello", "Tórax", "Espalda", 
         "Abdomen", "Genitales", "Glúteo", "Sacro", "Brazo", "Mano", 
@@ -419,7 +439,7 @@ with col_c:
         st.session_state.sam_metrics = {}
         st.session_state.chat_messages = []
         
-        with st.spinner("IA #1: Procesando datos y generando informe preliminar..."):
+        with st.spinner("IA #1 (Gemini): Procesando pruebas y generando borrador..."):
             try:
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
                 con = []
@@ -619,7 +639,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 </details>
 """
 
-                # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO) ---
+                # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO GEMINI) ---
                 prompt_adjunto = f"""
                 DIRECTRIZ SUPREMA: Eres LabMind, una IA de grado médico estricto. NO INVENTES DATOS.
 
@@ -644,7 +664,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 {html_requerido}
                 """
                 
-                # EJECUCIÓN AGENTE 1
+                # EJECUCIÓN AGENTE 1 (GEMINI)
                 res_adjunto = model.generate_content(
                     [prompt_adjunto, *con] if con else prompt_adjunto, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
@@ -654,33 +674,65 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- FIX V148: PROMPT AGENTE 2 (JEFE DE SERVICIO / AUDITOR) ---
-                st.toast("🕵️‍♂️ IA #2: Auditoría clínica en curso (Verificando alucinaciones)...")
-                
+                # --- FIX V149: AUDITORÍA CLÍNICA (CLAUDE O GEMINI) ---
                 prompt_auditor = f"""
-                Eres el JEFE DE SERVICIO MÉDICO (Auditor de Calidad y Seguridad del Paciente).
-                Un médico adjunto (IA) ha generado este informe preliminar basándose en las pruebas adjuntas:
+                Eres el JEFE DE SERVICIO MÉDICO (Auditor Clínico).
+                Un médico adjunto acaba de evaluar a un paciente y los datos adjuntos, generando este informe:
 
-                INFORME PRELIMINAR A EVALUAR:
+                --- INFORME PRELIMINAR A EVALUAR ---
                 {raw_txt_inicial}
+                -------------------------------------
 
-                TU MISIÓN:
-                1. Revisa rigurosamente el Informe Preliminar comparándolo con las imágenes, audios o textos aportados.
-                2. Busca errores mortales, alucinaciones (cosas inventadas que no están en las pruebas) o asunciones sin base.
-                3. Si detectas un error grave: CORRIGE el texto manteniendo el mismo formato HTML de tarjetas, baja el % de certeza y añade una advertencia clínica.
-                4. Si el informe preliminar es CORRECTO y SEGURO: Devuélvelo EXACTAMENTE igual, pero añade en la primera tarjeta, justo después del diagnóstico, esta etiqueta: "✅ <b>[Verificado por IA Auditora]</b>".
+                DATOS CLÍNICOS DEL PACIENTE:
+                Notas del usuario: {notas}
+                Textos extraídos (Analíticas/PubMed): {txt_docs[:10000]}
+
+                TU MISIÓN ESTRICTA:
+                1. Revisa rigurosamente la coherencia del Informe Preliminar comparándolo con los datos clínicos en texto.
+                2. Busca asunciones peligrosas, errores de tratamiento o alucinaciones (cosas inventadas).
+                3. Si detectas un error: CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML de tarjetas (<details>, <summary>, etc).
+                4. Si el informe es CORRECTO: Devuélvelo EXACTAMENTE igual, pero añade al final del título de la primera tarjeta esta etiqueta: " ⚕️ <b>[Validado]</b>".
                 
-                IMPORTANTE: Responde ÚNICAMENTE con el código HTML final. No añadas introducciones ni saludos.
+                NO añadas saludos. NO escribas ```html. Devuelve SOLO el código final de las tarjetas.
                 """
-                
+
                 # EJECUCIÓN AGENTE 2
-                res_auditor = model.generate_content(
-                    [prompt_auditor, *con] if con else prompt_auditor, 
-                    safety_settings=MEDICAL_SAFETY_SETTINGS,
-                    generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
-                )
+                raw_txt = ""
                 
-                raw_txt = res_auditor.text.replace("```html", "").replace("```", "").strip()
+                if st.session_state.get("api_key_claude"):
+                    # USAMOS CLAUDE 3.5 SONNET
+                    st.toast("🕵️‍♂️ IA #2 (Claude 3.5): Verificando seguridad clínica cruzada...")
+                    try:
+                        import anthropic
+                        client = anthropic.Anthropic(api_key=st.session_state.api_key_claude)
+                        
+                        message = client.messages.create(
+                            model="claude-3-5-sonnet-20241022",
+                            max_tokens=2500,
+                            temperature=0.0,
+                            system="Eres un estricto auditor médico experto en seguridad del paciente y control de formatos HTML. Tu misión es corregir sesgos y errores de otros sistemas.",
+                            messages=[
+                                {"role": "user", "content": prompt_auditor}
+                            ]
+                        )
+                        raw_txt = message.content[0].text
+                    except Exception as e:
+                        print(f"Error Claude: {e}")
+                        st.toast("⚠️ Fallo en Claude. Gemini asume la auditoría.")
+                        res_auditor = model.generate_content(prompt_auditor, generation_config={"temperature": 0.0})
+                        raw_txt = res_auditor.text
+                else:
+                    # GEMINI SE AUDITA A SÍ MISMO
+                    st.toast("🕵️‍♂️ IA #2 (Gemini): Auto-verificando el informe preliminar...")
+                    res_auditor = model.generate_content(
+                        prompt_auditor, 
+                        safety_settings=MEDICAL_SAFETY_SETTINGS,
+                        generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
+                    )
+                    raw_txt = res_auditor.text
+
+                # LIMPIEZA FINAL DEL HTML DEL AUDITOR
+                raw_txt = raw_txt.replace("```html", "").replace("```", "").strip()
                 raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
 
                 # --- EXTRACCIÓN DE FOTOGRAMAS Y BBOX (Mantenido) ---
