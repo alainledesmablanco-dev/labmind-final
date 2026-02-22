@@ -64,7 +64,8 @@ MEDICAL_SAFETY_SETTINGS = [
 cookie_manager = stx.CookieManager()
 time.sleep(0.1)
 
-for key in ["autenticado", "api_key", "api_key_claude", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "last_video_path"]:
+# Se reemplaza la clave de claude por la de groq en el estado
+for key in ["autenticado", "api_key", "api_key_groq", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "last_video_path"]:
     if key not in st.session_state: st.session_state[key] = [] if key in ["chat_messages", "modelos_disponibles"] else None
 if "autenticado" not in st.session_state or not st.session_state.autenticado:
     st.session_state.autenticado = False
@@ -72,27 +73,27 @@ if "pocus_metrics" not in st.session_state: st.session_state.pocus_metrics = {}
 if "sam_metrics" not in st.session_state: st.session_state.sam_metrics = {}
 
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
-cookie_api_key_claude = cookie_manager.get(cookie="labmind_claude_key")
+cookie_api_key_groq = cookie_manager.get(cookie="labmind_groq_key")
 
 if not st.session_state.autenticado:
     if cookie_api_key:
         st.session_state.api_key = cookie_api_key
-        if cookie_api_key_claude:
-            st.session_state.api_key_claude = cookie_api_key_claude
+        if cookie_api_key_groq:
+            st.session_state.api_key_groq = cookie_api_key_groq
         st.session_state.autenticado = True
         st.rerun()
     else:
         st.title("LabMind Acceso")
         k = st.text_input("API Key Google (Gemini) [Obligatorio]:", type="password")
-        k_claude = st.text_input("API Key Anthropic (Claude) [Opcional para Doble IA]:", type="password")
+        k_groq = st.text_input("API Key Groq (Llama 3) [Opcional para Doble IA - GRATIS]:", type="password")
         if st.button("Entrar", type="primary"):
             if k:
                 expires = datetime.datetime.now() + datetime.timedelta(days=30)
                 cookie_manager.set("labmind_secret_key", k, expires_at=expires)
                 st.session_state.api_key = k
-                if k_claude:
-                    cookie_manager.set("labmind_claude_key", k_claude, expires_at=expires)
-                    st.session_state.api_key_claude = k_claude
+                if k_groq:
+                    cookie_manager.set("labmind_groq_key", k_groq, expires_at=expires)
+                    st.session_state.api_key_groq = k_groq
                 st.session_state.autenticado = True
                 st.rerun()
             else:
@@ -349,8 +350,8 @@ with col_l:
                 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", st.session_state.modelos_disponibles, index=idx_defecto)
     
-    if st.session_state.get("api_key_claude"):
-        st.success("✅ Claude 3.5 enlazado como Auditor")
+    if st.session_state.get("api_key_groq"):
+        st.success("✅ Llama 3 (Groq) enlazado como Auditor")
     else:
         st.info("ℹ️ Gemini auditará sus propias respuestas.")
         
@@ -674,51 +675,50 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- FIX V149: AUDITORÍA CLÍNICA (CLAUDE O GEMINI) ---
+                # --- FIX V150: AUDITORÍA CLÍNICA CRUZADA CON GROQ (LLAMA 3.3) ---
                 prompt_auditor = f"""
-                Eres el JEFE DE SERVICIO MÉDICO (Auditor Clínico).
-                Un médico adjunto acaba de evaluar a un paciente y los datos adjuntos, generando este informe:
+                Eres el JEFE DE SERVICIO MÉDICO (Auditor Clínico Estricto).
+                Un médico adjunto (IA) acaba de evaluar a un paciente basándose en datos, generando este informe:
 
                 --- INFORME PRELIMINAR A EVALUAR ---
                 {raw_txt_inicial}
                 -------------------------------------
 
-                DATOS CLÍNICOS DEL PACIENTE:
+                DATOS CLÍNICOS DISPONIBLES EN TEXTO:
                 Notas del usuario: {notas}
                 Textos extraídos (Analíticas/PubMed): {txt_docs[:10000]}
 
                 TU MISIÓN ESTRICTA:
-                1. Revisa rigurosamente la coherencia del Informe Preliminar comparándolo con los datos clínicos en texto.
-                2. Busca asunciones peligrosas, errores de tratamiento o alucinaciones (cosas inventadas).
-                3. Si detectas un error: CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML de tarjetas (<details>, <summary>, etc).
-                4. Si el informe es CORRECTO: Devuélvelo EXACTAMENTE igual, pero añade al final del título de la primera tarjeta esta etiqueta: " ⚕️ <b>[Validado]</b>".
+                1. Revisa rigurosamente la coherencia del Informe Preliminar comparándolo con los datos clínicos aportados.
+                2. Busca asunciones peligrosas, errores de tratamiento, sobrediagnósticos o alucinaciones (cosas inventadas).
+                3. Si detectas un error: CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML de tarjetas (<details>, <summary>, etc) y baja el % de Certeza.
+                4. Si el informe es CORRECTO: Devuélvelo EXACTAMENTE igual, pero añade al final del título de la primera tarjeta esta etiqueta: " ⚕️ <b>[Validado por Llama 3]</b>".
                 
-                NO añadas saludos. NO escribas ```html. Devuelve SOLO el código final de las tarjetas.
+                NO añadas saludos, ni explicaciones previas. NO escribas ```html. Devuelve SOLO el código final de las tarjetas HTML.
                 """
 
-                # EJECUCIÓN AGENTE 2
                 raw_txt = ""
                 
-                if st.session_state.get("api_key_claude"):
-                    # USAMOS CLAUDE 3.5 SONNET
-                    st.toast("🕵️‍♂️ IA #2 (Claude 3.5): Verificando seguridad clínica cruzada...")
+                if st.session_state.get("api_key_groq"):
+                    # USAMOS GROQ (LLAMA 3) GRATIS
+                    st.toast("🕵️‍♂️ IA #2 (Llama 3.3): Verificación cruzada en curso...")
                     try:
-                        import anthropic
-                        client = anthropic.Anthropic(api_key=st.session_state.api_key_claude)
+                        import groq
+                        client = groq.Groq(api_key=st.session_state.api_key_groq)
                         
-                        message = client.messages.create(
-                            model="claude-3-5-sonnet-20241022",
-                            max_tokens=2500,
-                            temperature=0.0,
-                            system="Eres un estricto auditor médico experto en seguridad del paciente y control de formatos HTML. Tu misión es corregir sesgos y errores de otros sistemas.",
+                        chat_completion = client.chat.completions.create(
                             messages=[
+                                {"role": "system", "content": "Eres un estricto auditor médico experto en seguridad del paciente y control de formatos HTML. Tu misión es corregir sesgos y errores de otros sistemas."},
                                 {"role": "user", "content": prompt_auditor}
-                            ]
+                            ],
+                            model="llama-3.3-70b-versatile",
+                            temperature=0.0,
+                            max_tokens=2500,
                         )
-                        raw_txt = message.content[0].text
+                        raw_txt = chat_completion.choices[0].message.content
                     except Exception as e:
-                        print(f"Error Claude: {e}")
-                        st.toast("⚠️ Fallo en Claude. Gemini asume la auditoría.")
+                        print(f"Error Groq: {e}")
+                        st.toast("⚠️ Fallo en Groq. Gemini asume la auditoría final.")
                         res_auditor = model.generate_content(prompt_auditor, generation_config={"temperature": 0.0})
                         raw_txt = res_auditor.text
                 else:
