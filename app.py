@@ -89,12 +89,15 @@ if not st.session_state.autenticado:
         if st.button("Entrar", type="primary"):
             if k:
                 expires = datetime.datetime.now() + datetime.timedelta(days=30)
-                cookie_manager.set("labmind_secret_key", k, expires_at=expires)
+                # Le añadimos un key único al guardado de Google
+                cookie_manager.set("labmind_secret_key", k, expires_at=expires, key="set_cookie_gemini")
                 st.session_state.api_key = k
                 if k_groq:
-                    cookie_manager.set("labmind_groq_key", k_groq, expires_at=expires)
+                    # Le añadimos un key único al guardado de Groq
+                    cookie_manager.set("labmind_groq_key", k_groq, expires_at=expires, key="set_cookie_groq")
                     st.session_state.api_key_groq = k_groq
                 st.session_state.autenticado = True
+                time.sleep(0.5) # Pausa de medio segundo para que guarde ambas bien
                 st.rerun()
             else:
                 st.error("La API Key de Google es obligatoria.")
