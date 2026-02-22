@@ -575,11 +575,11 @@ with col_c:
 </details>
 """
                 elif modo == "📚 Agente Investigador (PubMed)":
-                    # --- FIX V143: TRIAGE DE EVIDENCIA EN 3 FASES ---
+                    # --- FIX V144: ENLACES CLICABLES PARA OTRAS FUENTES (Cochrane, NICE, etc) ---
                     instrucciones_especificas = """- INSTRUCCIÓN AGENTE CLÍNICO: Eres un experto farmacólogo e investigador. ESCUCHA ATENTAMENTE EL AUDIO ADJUNTO (si lo hay) y lee los datos de PubMed.
-REGLA DE ORO DE TRANSPARENCIA (TRIAGE DE EVIDENCIA):
+REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
 1. Si en los "Datos" recibes artículos con números PMID, OBLIGATORIAMENTE cítalos usando esta estructura HTML: <a href="https://pubmed.ncbi.nlm.nih.gov/AQUI_EL_NUMERO_PMID/" target="_blank">PMID: AQUI_EL_NUMERO_PMID</a>.
-2. Si los "Datos" están vacíos, busca en tu memoria interna evidencia de OTRAS fuentes de alta fiabilidad (Cochrane, UpToDate, guías clínicas internacionales). En este caso, inicia la respuesta con: "⚠️ <b>Búsqueda automática en PubMed sin resultados. Evidencia rescatada de otras fuentes fiables (ej. Cochrane, Guías Clínicas).</b>" y cita la fuente lo mejor posible.
+2. Si los "Datos" están vacíos, busca en tu memoria interna evidencia de OTRAS fuentes de alta fiabilidad (Cochrane, UpToDate, guías clínicas internacionales). En este caso, inicia la respuesta con: "⚠️ <b>Búsqueda automática en PubMed sin resultados. Evidencia rescatada de otras fuentes fiables.</b>" y OBLIGATORIAMENTE incluye un enlace HTML clicable a la web de la organización o institución (ej. <a href="https://www.cochranelibrary.com/" target="_blank">Revisión Cochrane</a> o <a href="https://www.nice.org.uk/" target="_blank">Guía NICE</a>).
 3. Como ÚLTIMO RECURSO, si no hay literatura o estudios claros, inicia con: "⚠️ <b>No existe evidencia científica indexada clara. Respuesta basada en principios fisiopatológicos y consenso clínico.</b>" y razona la respuesta."""
                     html_requerido = """
 <details class="pubmed-box" open>
@@ -589,7 +589,7 @@ REGLA DE ORO DE TRANSPARENCIA (TRIAGE DE EVIDENCIA):
 
 <details class="radiomics-box" open>
 <summary>🔬 FARMACOLOGÍA Y ESTUDIOS (REFERENCIAS)</summary>
-<p>[Explicación científica profunda. Si usaste PubMed, pon AQUÍ la lista de referencias con los enlaces HTML obligatorios descritos en las instrucciones. Si usaste otras fuentes, menciónalas claramente.]</p>
+<p>[Explicación científica profunda. Si usaste PubMed o Guías/Cochrane, pon AQUÍ la lista de referencias con sus enlaces HTML clicables obligatorios según las instrucciones. Si usaste principios fisiopatológicos, explícalos aquí.]</p>
 </details>
 
 <details class="action-box" open>
