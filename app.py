@@ -15,6 +15,7 @@ import pandas as pd
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
+import plotly.express as px  # <-- NUEVO: Para el visor interactivo
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
@@ -84,14 +85,47 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      MOTOR MOBILE SAM 1 OPTIMIZADO
+#      NUEVO: ANONIMIZACIÓN RGPD (Rostros)
 # ==========================================
-def segmentar_herida_sam_v2(img_pil):
+def anonimizar_imagen(img_pil):
+    """Detecta rostros y los difumina para cumplir con protección de datos"""
+    try:
+        img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+        # Cargamos el detector frontal básico de OpenCV
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        rostros = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+        
+        for (x, y, w, h) in rostros:
+            # Extraemos la región del rostro y aplicamos un desenfoque muy fuerte
+            roi = img_cv[y:y+h, x:x+w]
+            roi_blur = cv2.GaussianBlur(roi, (99, 99), 30)
+            img_cv[y:y+h, x:x+w] = roi_blur
+            
+        return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
+    except Exception as e:
+        print(f"Error RGPD Anonymizer: {e}")
+        return img_pil # Si falla, devuelve la original para no bloquear el análisis
+
+# ==========================================
+#      NUEVO: CACHÉ PARA MOTOR MOBILE SAM 1
+# ==========================================
+@st.cache_resource
+def load_sam_model():
+    """Carga el modelo en memoria RAM solo la primera vez para máxima velocidad"""
     try:
         from ultralytics import SAM
-        if not os.path.exists('mobile_sam.pt'):
-            return None, 0
-        model_sam = SAM('mobile_sam.pt')
+        if os.path.exists('mobile_sam.pt'):
+            return SAM('mobile_sam.pt')
+    except Exception as e:
+        print(f"Fallo al cargar SAM en caché: {e}")
+    return None
+
+def segmentar_herida_sam_v2(img_pil):
+    try:
+        model_sam = load_sam_model()
+        if model_sam is None: return None, 0
+        
         img_cv = cv2.cvtColor(np.array(img_pil.convert('RGB')), cv2.COLOR_RGB2BGR)
         h, w = img_cv.shape[:2]
         puntos = [[w//2, h//2]]
@@ -105,7 +139,7 @@ def segmentar_herida_sam_v2(img_pil):
             contours, _ = cv2.findContours((mask > 0.5).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             cv2.drawContours(overlay, contours, -1, (0, 255, 0), 3)
             return Image.fromarray(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)), int(np.sum(mask > 0.5))
-    except Exception as e: print(f"Error SAM: {e}")
+    except Exception as e: print(f"Error SAM Segmentación: {e}")
     return None, 0
 
 # ==========================================
@@ -291,7 +325,7 @@ with col_c:
     modo = st.selectbox("Especialidad:", ["✨ Autodetectar", "🩹 Heridas / Úlceras", "🦇 Ecografía / POCUS", "📚 Agente Investigador (PubMed)", "📈 ECG", "💀 RX/TAC", "🧴 Dermatología"])
     contexto = st.selectbox("🏥 Contexto:", ["Urgencias", "Hospitalización", "UCI", "Residencia", "Domicilio"], index=1)
     
-    archivos = []; audio_val = None
+    archivos = []; audio_val = None; fs = None; cam_pic = None
     notas = ""
     
     if modo == "📚 Agente Investigador (PubMed)":
@@ -300,14 +334,24 @@ with col_c:
         with st.expander("📝 Notas Clínicas", expanded=False):
             notas = st.text_area("Contexto:", height=70, label_visibility="collapsed")
     else:
-        fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
+        tab1, tab2 = st.tabs(["📁 Subir Archivos", "📸 Tomar Foto"])
+        
+        with tab1:
+            fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
+            st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
+        
+        with tab2:
+            cam_pic = st.camera_input("Cámara")
+            
         if fs:
             for f in fs:
                 if f.type.startswith('video') or f.name.lower().endswith(('mp4', 'mov')): archivos.append(("video", f))
                 elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
+        
+        if cam_pic:
+            archivos.append(("img", cam_pic))
                 
-        # --- CAMBIO REALIZADO: Quitamos "Preguntas Específicas" del título ---
         with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
             notas = st.text_area("Notas", height=70, placeholder="Escribe el contexto del paciente...", label_visibility="collapsed")
             
@@ -381,7 +425,9 @@ with col_c:
                     elif tipo == "doc":
                         txt_docs += "".join([p.extract_text() for p in pypdf.PdfReader(f).pages])
                     elif tipo == "img":
-                        img = ImageOps.exif_transpose(Image.open(f)).convert("RGB")
+                        # Carga y anonimización de la imagen RGPD
+                        img_raw = ImageOps.exif_transpose(Image.open(f)).convert("RGB")
+                        img = anonimizar_imagen(img_raw)
                         
                         if modo in ["🩹 Heridas / Úlceras", "🧴 Dermatología"]:
                             sam_res, a_px = segmentar_herida_sam_v2(img)
@@ -411,7 +457,6 @@ with col_c:
                 else:
                     instruccion_anatomia = f"El usuario especifica que la zona es: {st.session_state.punto_cuerpo}. Basa tu análisis en ello."
 
-                # --- CAMBIO REALIZADO: Cuidados de Enfermería al final del HTML ---
                 prompt = f"""
                 Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
                 Contexto: {contexto}. Especialidad: {modo}.
@@ -443,7 +488,7 @@ with col_c:
                     st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
                     frame_extraido, raw_txt = extraer_frame_video(st.session_state.last_video_path, raw_txt)
                     if frame_extraido:
-                        img_base_para_bbox = frame_extraido
+                        img_base_para_bbox = anonimizar_imagen(frame_extraido) # Anonimizar frame
                 
                 if img_base_para_bbox and not sam_utilizado:
                     im_m, clean_t, det = extraer_y_dibujar_bboxes(raw_txt, img_base_para_bbox)
@@ -476,9 +521,17 @@ with col_r:
             
         if st.session_state.get("video_bytes"): 
             st.video(st.session_state.video_bytes)
+            
         if st.session_state.get("img_marcada"):
             st.markdown("#### 🎯 Fotograma / Visión IA")
-            st.image(st.session_state.img_marcada, use_container_width=True)
+            # --- NUEVO VISOR INTERACTIVO CON PLOTLY ---
+            try:
+                fig = px.imshow(st.session_state.img_marcada)
+                fig.update_layout(coloraxis_showscale=False, margin=dict(l=0, r=0, t=0, b=0), xaxis_visible=False, yaxis_visible=False)
+                st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
+            except Exception as e:
+                # Fallback por si hay algún error con la librería gráfica
+                st.image(st.session_state.img_marcada, use_container_width=True)
 
 # ==========================================
 # --- CHAT FLOTANTE ---
