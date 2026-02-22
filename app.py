@@ -242,7 +242,8 @@ def extraer_frame_video(video_path, texto):
 # ==========================================
 #      FUNCIONES IA Y AUXILIARES
 # ==========================================
-def buscar_en_pubmed(query, max_results=4):
+# --- FIX V145: AUMENTADO A 10 ARTÍCULOS PARA MÁXIMA EVIDENCIA ---
+def buscar_en_pubmed(query, max_results=10):
     try:
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
         search_url = f"{base_url}esearch.fcgi?db=pubmed&term={urllib.parse.quote(query)}&retmode=json&retmax={max_results}&sort=relevance"
@@ -575,7 +576,6 @@ with col_c:
 </details>
 """
                 elif modo == "📚 Agente Investigador (PubMed)":
-                    # --- FIX V144: ENLACES CLICABLES PARA OTRAS FUENTES (Cochrane, NICE, etc) ---
                     instrucciones_especificas = """- INSTRUCCIÓN AGENTE CLÍNICO: Eres un experto farmacólogo e investigador. ESCUCHA ATENTAMENTE EL AUDIO ADJUNTO (si lo hay) y lee los datos de PubMed.
 REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
 1. Si en los "Datos" recibes artículos con números PMID, OBLIGATORIAMENTE cítalos usando esta estructura HTML: <a href="https://pubmed.ncbi.nlm.nih.gov/AQUI_EL_NUMERO_PMID/" target="_blank">PMID: AQUI_EL_NUMERO_PMID</a>.
@@ -620,20 +620,23 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
 </details>
 """
 
+                # --- FIX V145: AMPLIACIÓN DE LECTURA (15000 chars) Y REGLAS ANTI-ALUCINACIÓN ---
                 prompt = f"""
                 Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
                 Contexto: {contexto}. Especialidad: {modo}.
                 Usuario (Notas): "{notas}"
-                Datos PubMed/Textos: {txt_docs[:5000]}
+                Datos Aportados: {txt_docs[:15000]}
 
                 RAZONAMIENTO EN CADENA:
                 1. ANÁLISIS: Analiza profundamente la prueba, el texto, o el AUDIO aportado por el usuario.
                 2. IDENTIFICACIÓN: Busca signos patológicos, interacciones o dudas específicas.
                 3. JUICIO CLÍNICO: Emite el diagnóstico o la respuesta científica final.
                 
-                REGLAS EXTRA:
+                REGLAS EXTRA (SEGURIDAD MÁXIMA):
                 - {instruccion_bbox}
                 - {instruccion_anatomia}
+                - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente o emitir juicios, básate ÚNICA Y EXCLUSIVAMENTE en los Datos, Imágenes y Notas aportadas arriba. No asumas comorbilidades ni medicaciones que no se mencionen explícitamente.
+                - REGLA ANTI-ALUCINACIÓN (CERO INVENTIVA): Si la imagen es borrosa, el documento es ilegible o los datos son insuficientes para una conclusión 100% segura, ESTÁS OBLIGADO a decir "⚠️ DATOS INSUFICIENTES PARA VALORACIÓN CLÍNICA". NO inventes hallazgos. NO asumas valores que no puedes leer claramente.
                 {instrucciones_especificas}
 
                 INSTRUCCIÓN DE FORMATO MUY ESTRICTA:
@@ -642,7 +645,12 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
                 {html_requerido}
                 """
                 
-                res = model.generate_content([prompt, *con] if con else prompt, safety_settings=MEDICAL_SAFETY_SETTINGS)
+                # --- FIX V145: TEMPERATURA 0.0 PARA RESPUESTAS DETERMINISTAS MATEMÁTICAS ---
+                res = model.generate_content(
+                    [prompt, *con] if con else prompt, 
+                    safety_settings=MEDICAL_SAFETY_SETTINGS,
+                    generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
+                )
                 
                 raw_txt = res.text.replace("```html", "").replace("```", "").strip()
                 raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
@@ -705,7 +713,14 @@ if st.session_state.resultado_analisis:
         try:
             chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
             ctx_chat = f"Informe clínico previo:\n{st.session_state.resultado_analisis}\nResponde a esta duda del médico/enfermero: {query}"
-            resp = chat_model.generate_content(ctx_chat, safety_settings=MEDICAL_SAFETY_SETTINGS)
+            
+            # --- FIX V145: TEMPERATURA 0.0 TAMBIÉN EN EL CHAT FLOTANTE ---
+            resp = chat_model.generate_content(
+                ctx_chat, 
+                safety_settings=MEDICAL_SAFETY_SETTINGS,
+                generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
+            )
+            
             st.session_state.chat_messages.append({"role":"assistant","content":resp.text})
         except Exception as e:
             st.session_state.chat_messages.append({"role":"assistant","content":f"Error: {e}"})
