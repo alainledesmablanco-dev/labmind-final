@@ -85,20 +85,38 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      ANONIMIZACIÓN RGPD (Rostros)
+#      ANONIMIZACIÓN RGPD (SELECTIVA)
 # ==========================================
-def anonimizar_imagen(img_pil):
-    """Detecta rostros y los difumina para cumplir con protección de datos"""
+def anonimizar_imagen(img_pil, modo):
+    """Difumina rostros (excepto en Derma/Heridas) y texto/nombres para protección de datos"""
     try:
         img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-        rostros = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
         
-        for (x, y, w, h) in rostros:
-            roi = img_cv[y:y+h, x:x+w]
-            roi_blur = cv2.GaussianBlur(roi, (99, 99), 30)
-            img_cv[y:y+h, x:x+w] = roi_blur
+        # 1. Filtro de rostros (Solo actúa si NO estamos en Derma o Heridas)
+        if modo not in ["🩹 Heridas / Úlceras", "🧴 Dermatología"]:
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            rostros = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+            for (x, y, w, h) in rostros:
+                roi = img_cv[y:y+h, x:x+w]
+                roi_blur = cv2.GaussianBlur(roi, (99, 99), 30)
+                img_cv[y:y+h, x:x+w] = roi_blur
+        
+        # 2. Filtro de texto/nombres (Actúa silenciosamente si pytesseract está instalado)
+        try:
+            import pytesseract
+            datos = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+            for i in range(len(datos['text'])):
+                if int(datos['conf'][i]) > 60: 
+                    texto = datos['text'][i].strip()
+                    # Si detecta palabras largas (posibles nombres o datos)
+                    if len(texto) >= 4:
+                        x, y, w, h = datos['left'][i], datos['top'][i], datos['width'][i], datos['height'][i]
+                        roi = img_cv[y:y+h, x:x+w]
+                        roi_blur = cv2.GaussianBlur(roi, (15, 15), 10)
+                        img_cv[y:y+h, x:x+w] = roi_blur
+        except ImportError:
+            pass # Si no hay librería OCR, omite este paso sin romper la aplicación
             
         return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     except Exception as e:
@@ -322,26 +340,10 @@ with col_l:
                 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", st.session_state.modelos_disponibles, index=idx_defecto)
     
-    # --- NUEVO LISTADO DE ANATOMÍA COMPLETO ---
     lista_anatomia = [
-        "✨ Autodetectar", 
-        "Cabeza", 
-        "Cara", 
-        "Cuello", 
-        "Tórax", 
-        "Espalda", 
-        "Abdomen",
-        "Pelvis", 
-        "Genitales", 
-        "Glúteo", 
-        "Sacro", 
-        "Brazo",
-        "Antebrazo",
-        "muñeca",
-        "Mano", 
-        "Muslo", 
-        "Pierna", 
-        "Pie"
+        "✨ Autodetectar", "Cabeza", "Cara", "Cuello", "Tórax", "Espalda", 
+        "Abdomen", "Genitales", "Glúteo", "Sacro", "Brazo", "Mano", 
+        "Muslo", "Pierna", "talón", "Pie"
     ]
     st.session_state.punto_cuerpo = st.selectbox("Anatomía:", lista_anatomia)
 
@@ -363,6 +365,7 @@ with col_c:
         
         if metodo_captura == "📁 Subir Archivos":
             fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
+            st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
         elif metodo_captura == "📸 Tomar Foto":
             cam_pic = st.camera_input("Cámara")
             
@@ -449,7 +452,9 @@ with col_c:
                         txt_docs += "".join([p.extract_text() for p in pypdf.PdfReader(f).pages])
                     elif tipo == "img":
                         img_raw = ImageOps.exif_transpose(Image.open(f)).convert("RGB")
-                        img = anonimizar_imagen(img_raw)
+                        
+                        # --- LLAMADA A LA NUEVA ANONIMIZACIÓN (PASA EL MODO) ---
+                        img = anonimizar_imagen(img_raw, modo)
                         
                         if modo in ["🩹 Heridas / Úlceras", "🧴 Dermatología"]:
                             sam_res, a_px = segmentar_herida_sam_v2(img)
@@ -510,7 +515,7 @@ with col_c:
                     st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
                     frame_extraido, raw_txt = extraer_frame_video(st.session_state.last_video_path, raw_txt)
                     if frame_extraido:
-                        img_base_para_bbox = anonimizar_imagen(frame_extraido)
+                        img_base_para_bbox = anonimizar_imagen(frame_extraido, modo)
                 
                 if img_base_para_bbox and not sam_utilizado:
                     im_m, clean_t, det = extraer_y_dibujar_bboxes(raw_txt, img_base_para_bbox)
