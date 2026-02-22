@@ -242,7 +242,6 @@ def extraer_frame_video(video_path, texto):
 # ==========================================
 #      FUNCIONES IA Y AUXILIARES
 # ==========================================
-# --- FIX V145: AUMENTADO A 10 ARTÍCULOS PARA MÁXIMA EVIDENCIA ---
 def buscar_en_pubmed(query, max_results=10):
     try:
         base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
@@ -620,7 +619,6 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
 </details>
 """
 
-                # --- FIX V145: AMPLIACIÓN DE LECTURA (15000 chars) Y REGLAS ANTI-ALUCINACIÓN ---
                 prompt = f"""
                 Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
                 Contexto: {contexto}. Especialidad: {modo}.
@@ -645,7 +643,6 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
                 {html_requerido}
                 """
                 
-                # --- FIX V145: TEMPERATURA 0.0 PARA RESPUESTAS DETERMINISTAS MATEMÁTICAS ---
                 res = model.generate_content(
                     [prompt, *con] if con else prompt, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
@@ -707,21 +704,38 @@ with col_r:
 # ==========================================
 # --- CHAT FLOTANTE ---
 # ==========================================
+# --- FIX V146: CHAT RESTAURADO CON RENDERIZADO VISUAL Y MEMORIA ---
 if st.session_state.resultado_analisis:
-    if query := st.chat_input("Duda clínica sobre este paciente..."):
-        st.session_state.chat_messages.append({"role":"user","content":query})
+    st.divider()
+    st.markdown("### 💬 Chat Interactivo IA")
+    
+    # Renderizar el historial de la conversación para que no desaparezca
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if query := st.chat_input("Duda clínica sobre este paciente o investigación..."):
+        # Guardar la pregunta del usuario
+        st.session_state.chat_messages.append({"role": "user", "content": query})
+        
         try:
             chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
-            ctx_chat = f"Informe clínico previo:\n{st.session_state.resultado_analisis}\nResponde a esta duda del médico/enfermero: {query}"
             
-            # --- FIX V145: TEMPERATURA 0.0 TAMBIÉN EN EL CHAT FLOTANTE ---
+            # Construir la memoria enviando el análisis original + los mensajes previos
+            historial = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_messages[:-1]])
+            ctx_chat = f"Informe/Análisis clínico base:\n{st.session_state.resultado_analisis}\n\nHistorial de conversación:\n{historial}\n\nResponde a esta nueva duda del médico/enfermero de forma concisa y estricta: {query}"
+            
             resp = chat_model.generate_content(
                 ctx_chat, 
                 safety_settings=MEDICAL_SAFETY_SETTINGS,
-                generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
+                generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10} # Misma seguridad matemática
             )
             
-            st.session_state.chat_messages.append({"role":"assistant","content":resp.text})
+            # Guardar la respuesta de la IA
+            st.session_state.chat_messages.append({"role": "assistant", "content": resp.text})
+            
         except Exception as e:
-            st.session_state.chat_messages.append({"role":"assistant","content":f"Error: {e}"})
+            st.session_state.chat_messages.append({"role": "assistant", "content": f"Error del servidor: {e}"})
+            
+        # Forzar recarga para que se dibuje el nuevo mensaje
         st.rerun()
