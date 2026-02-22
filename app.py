@@ -419,7 +419,7 @@ with col_c:
         st.session_state.sam_metrics = {}
         st.session_state.chat_messages = []
         
-        with st.spinner("Procesando datos (Razonamiento en Cadena activado)..."):
+        with st.spinner("Procesando datos (Verificación cruzada activada)..."):
             try:
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
                 con = []
@@ -499,7 +499,7 @@ with col_c:
                 else:
                     instruccion_anatomia = f"El usuario especifica que la zona es: {st.session_state.punto_cuerpo}. Basa tu análisis en ello."
 
-                # --- INSTRUCCIONES ESPECÍFICAS Y HTML ---
+                # --- INSTRUCCIONES ESPECÍFICAS Y HTML V147 ---
                 instrucciones_especificas = ""
                 html_requerido = ""
                 
@@ -515,7 +515,7 @@ with col_c:
                     html_requerido = """
 <details class="diagnosis-box" open>
 <summary>🚨 HALLAZGOS Y RAZONAMIENTO</summary>
-<p><b>[Diagnóstico]</b>. [Tu análisis]</p>
+<p><b>[Diagnóstico]</b> [Certeza: XX%]. [Tu análisis]</p>
 </details>
 
 <details class="action-box" open>
@@ -529,11 +529,11 @@ with col_c:
 </details>
 """
                 elif modo == "🩸 Analíticas (God Mode)":
-                    instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE ANALÍTICAS: Eres un experto intensivista y bioquímico clínico. 1. Busca patrones ocultos. 2. Si dispones de los datos numéricos, CALCULA OBLIGATORIAMENTE y muestra: Anion Gap, Gap Osmolar, Calcio corregido por albúmina y filtrado glomerular estimado (CKD-EPI). 3. Identifica el trastorno ácido-base primario y las compensaciones esperadas. 4. Advierte explícitamente sobre posibles errores pre-analíticos (ej. hemólisis falsa hiperpotasemia) o cascadas de fallo orgánico inminente."
+                    instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE ANALÍTICAS: Eres un experto intensivista y bioquímico clínico. 1. Busca patrones ocultos. 2. Si dispones de los datos numéricos, CALCULA OBLIGATORIAMENTE y muestra: Anion Gap, Gap Osmolar, Calcio corregido por albúmina y filtrado glomerular estimado (CKD-EPI). 3. Identifica el trastorno ácido-base primario y las compensaciones esperadas. 4. Advierte explícitamente sobre posibles errores pre-analíticos."
                     html_requerido = """
 <details class="diagnosis-box" open>
 <summary>🩸 ANÁLISIS BIOQUÍMICO Y PATRÓN</summary>
-<p><b>[Patrón Principal Detectado]</b>. [Análisis detallado incluyendo cálculos obligatorios como Anion Gap o Calcio Corregido si hay datos]</p>
+<p><b>[Patrón Principal Detectado]</b> [Certeza: XX%]. [Análisis detallado incluyendo cálculos obligatorios]</p>
 </details>
 
 <details class="action-box" open>
@@ -552,16 +552,16 @@ with col_c:
 </details>
 """
                 elif modo == "🧠 Medicina Interna (Holístico)":
-                    instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE INTERNA: Actúa como Jefe de Servicio de Medicina Interna de un hospital terciario. Tienes una visión holística. 1. SÍNTESIS: Cruza TODOS los datos (analíticas, imágenes, electros, notas clínicas). 2. NAVAJA DE OCKHAM: Busca y prioriza un diagnóstico principal y unificador que explique la totalidad de los hallazgos. 3. DICTUM DE HICKAM: Propón un diagnóstico diferencial riguroso por si coexisten patologías. 4. ESTRATIFICACIÓN VITAL: Define el nivel de gravedad (candidato a alta, planta, UCI o medidas paliativas)."
+                    instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE INTERNA: Actúa como Jefe de Servicio de Medicina Interna de un hospital terciario. Tienes una visión holística. 1. SÍNTESIS: Cruza TODOS los datos. 2. NAVAJA DE OCKHAM: Busca y prioriza un diagnóstico principal y unificador. 3. DICTUM DE HICKAM: Propón un diagnóstico diferencial riguroso. 4. ESTRATIFICACIÓN VITAL: Define el nivel de gravedad."
                     html_requerido = """
 <details class="diagnosis-box" open>
 <summary>🧠 DIAGNÓSTICO SINDRÓMICO INTEGRAL</summary>
-<p><b>[Diagnóstico Unificador Principal - Navaja de Ockham]</b>. [Síntesis holística cruzando todas las pruebas aportadas]</p>
+<p><b>[Diagnóstico Unificador Principal]</b> [Certeza: XX%]. [Síntesis holística cruzando todas las pruebas aportadas]</p>
 </details>
 
 <details class="action-box" open>
 <summary>⚡ DIAGNÓSTICO DIFERENCIAL Y TRIAGE</summary>
-<p>[Dictum de Hickam: Patologías concurrentes a descartar. Estratificación de gravedad y destino ideal (UCI/Planta/Alta)]</p>
+<p>[Dictum de Hickam: Patologías concurrentes a descartar. Estratificación de gravedad y destino ideal]</p>
 </details>
 
 <details class="material-box" open>
@@ -576,31 +576,31 @@ with col_c:
 """
                 elif modo == "📚 Agente Investigador (PubMed)":
                     instrucciones_especificas = """- INSTRUCCIÓN AGENTE CLÍNICO: Eres un experto farmacólogo e investigador. ESCUCHA ATENTAMENTE EL AUDIO ADJUNTO (si lo hay) y lee los datos de PubMed.
-REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
-1. Si en los "Datos" recibes artículos con números PMID, OBLIGATORIAMENTE cítalos usando esta estructura HTML: <a href="https://pubmed.ncbi.nlm.nih.gov/AQUI_EL_NUMERO_PMID/" target="_blank">PMID: AQUI_EL_NUMERO_PMID</a>.
-2. Si los "Datos" están vacíos, busca en tu memoria interna evidencia de OTRAS fuentes de alta fiabilidad (Cochrane, UpToDate, guías clínicas internacionales). En este caso, inicia la respuesta con: "⚠️ <b>Búsqueda automática en PubMed sin resultados. Evidencia rescatada de otras fuentes fiables.</b>" y OBLIGATORIAMENTE incluye un enlace HTML clicable a la web de la organización o institución (ej. <a href="https://www.cochranelibrary.com/" target="_blank">Revisión Cochrane</a> o <a href="https://www.nice.org.uk/" target="_blank">Guía NICE</a>).
-3. Como ÚLTIMO RECURSO, si no hay literatura o estudios claros, inicia con: "⚠️ <b>No existe evidencia científica indexada clara. Respuesta basada en principios fisiopatológicos y consenso clínico.</b>" y razona la respuesta."""
+REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
+1. Si usas artículos con números PMID, OBLIGATORIAMENTE cítalos usando esta estructura HTML: <a href="https://pubmed.ncbi.nlm.nih.gov/AQUI_EL_NUMERO_PMID/" target="_blank">PMID: AQUI_EL_NUMERO_PMID</a>.
+2. Si los "Datos" están vacíos, busca en tu memoria interna evidencia de OTRAS fuentes (Cochrane, UpToDate, guías). Inicia la respuesta con: "⚠️ <b>Búsqueda en PubMed sin resultados. Evidencia rescatada de otras fuentes.</b>" e incluye un enlace HTML clicable a la web de la organización.
+3. Como ÚLTIMO RECURSO, inicia con: "⚠️ <b>No existe evidencia indexada clara. Respuesta basada en principios fisiopatológicos.</b>" """
                     html_requerido = """
 <details class="pubmed-box" open>
 <summary>📚 RESPUESTA CLÍNICA Y EVIDENCIA</summary>
-<p><b>[Conclusión Directa]</b>. [Aplica obligatoriamente una de las advertencias ⚠️ aquí si no se usó PubMed. Luego da tu respuesta clara y directa a la duda planteada.]</p>
+<p><b>[Conclusión Directa]</b> [Certeza: XX%]. [Aplica obligatoriamente la advertencia ⚠️ si no se usó PubMed. Luego da tu respuesta clara.]</p>
 </details>
 
 <details class="radiomics-box" open>
 <summary>🔬 FARMACOLOGÍA Y ESTUDIOS (REFERENCIAS)</summary>
-<p>[Explicación científica profunda. Si usaste PubMed o Guías/Cochrane, pon AQUÍ la lista de referencias con sus enlaces HTML clicables obligatorios según las instrucciones. Si usaste principios fisiopatológicos, explícalos aquí.]</p>
+<p>[Explicación científica profunda. Pon AQUÍ la lista de referencias con sus enlaces HTML clicables obligatorios.]</p>
 </details>
 
 <details class="action-box" open>
 <summary>⚖️ RECOMENDACIÓN PRÁCTICA (CUIDADOS)</summary>
-<p>[Cómo aplicar esto en el paciente a pie de cama: precauciones, consejos de curas y advertencias de seguridad]</p>
+<p>[Cómo aplicar esto en el paciente a pie de cama: precauciones y advertencias de seguridad]</p>
 </details>
 """
                 else:
                     html_requerido = f"""
 <details class="diagnosis-box" open>
 <summary>🚨 HALLAZGOS Y RAZONAMIENTO</summary>
-<p><b>[Diagnóstico]</b>. [Tu análisis]</p>
+<p><b>[Diagnóstico]</b> [Certeza: XX%]. [Tu análisis]</p>
 </details>
 
 <details class="action-box" open>
@@ -619,30 +619,36 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML (TRIAGE DE EVIDENCIA):
 </details>
 """
 
+                # --- FIX V147: DIRECTRIZ SUPREMA (CADENA DE VERIFICACIÓN) ---
                 prompt = f"""
-                Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
+                DIRECTRIZ SUPREMA (PROTOCOLOS DE SEGURIDAD DEL PACIENTE):
+                Eres LabMind, una IA de grado médico estricto. Tu prioridad absoluta es NO INVENTAR DATOS (Cero Alucinaciones). Eres un auditor clínico implacable.
+
                 Contexto: {contexto}. Especialidad: {modo}.
                 Usuario (Notas): "{notas}"
                 Datos Aportados: {txt_docs[:15000]}
 
-                RAZONAMIENTO EN CADENA:
-                1. ANÁLISIS: Analiza profundamente la prueba, el texto, o el AUDIO aportado por el usuario.
-                2. IDENTIFICACIÓN: Busca signos patológicos, interacciones o dudas específicas.
-                3. JUICIO CLÍNICO: Emite el diagnóstico o la respuesta científica final.
+                CADENA DE VERIFICACIÓN OBLIGATORIA (CoVe):
+                Antes de escribir tu respuesta final, debes procesar mentalmente estos pasos:
+                1. Analizar evidencias.
+                2. Formular hipótesis.
+                3. AUTOCRÍTICA DE RED TEAM: Cuestiona tu propia hipótesis. ¿Faltan datos? ¿La imagen es borrosa? ¿Asumiste un valor no escrito?
+                4. CÁLCULO DE CERTEZA: Asigna un porcentaje real de fiabilidad a tu respuesta (0% a 100%). Si la imagen es mala o faltan datos, el porcentaje debe ser inferior al 50%.
                 
                 REGLAS EXTRA (SEGURIDAD MÁXIMA):
                 - {instruccion_bbox}
                 - {instruccion_anatomia}
-                - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente o emitir juicios, básate ÚNICA Y EXCLUSIVAMENTE en los Datos, Imágenes y Notas aportadas arriba. No asumas comorbilidades ni medicaciones que no se mencionen explícitamente.
-                - REGLA ANTI-ALUCINACIÓN (CERO INVENTIVA): Si la imagen es borrosa, el documento es ilegible o los datos son insuficientes para una conclusión 100% segura, ESTÁS OBLIGADO a decir "⚠️ DATOS INSUFICIENTES PARA VALORACIÓN CLÍNICA". NO inventes hallazgos. NO asumas valores que no puedes leer claramente.
+                - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente o emitir juicios, básate ÚNICA Y EXCLUSIVAMENTE en los Datos, Imágenes y Notas aportadas.
+                - CLÁUSULA DE IGNORANCIA: Si la imagen es borrosa o los datos son insuficientes para una conclusión segura, dilo explícitamente y baja tu % de Certeza. NO inventes hallazgos.
                 {instrucciones_especificas}
 
                 INSTRUCCIÓN DE FORMATO MUY ESTRICTA:
-                Debes responder ÚNICA y EXCLUSIVAMENTE copiando el siguiente bloque HTML y rellenando los corchetes. NO uses Markdown como ```html. NO rompas ni alteres las etiquetas <details> y <summary>.
+                Debes responder ÚNICA y EXCLUSIVAMENTE copiando el siguiente bloque HTML y rellenando los corchetes. Reemplaza [Certeza: XX%] por tu cálculo numérico. NO uses Markdown como ```html. 
 
                 {html_requerido}
                 """
                 
+                # --- FIX V147: TEMPERATURA 0.0 PARA RESPUESTAS DETERMINISTAS MATEMÁTICAS ---
                 res = model.generate_content(
                     [prompt, *con] if con else prompt, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
@@ -704,38 +710,31 @@ with col_r:
 # ==========================================
 # --- CHAT FLOTANTE ---
 # ==========================================
-# --- FIX V146: CHAT RESTAURADO CON RENDERIZADO VISUAL Y MEMORIA ---
 if st.session_state.resultado_analisis:
     st.divider()
     st.markdown("### 💬 Chat Interactivo IA")
     
-    # Renderizar el historial de la conversación para que no desaparezca
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     if query := st.chat_input("Duda clínica sobre este paciente o investigación..."):
-        # Guardar la pregunta del usuario
         st.session_state.chat_messages.append({"role": "user", "content": query})
         
         try:
             chat_model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
-            
-            # Construir la memoria enviando el análisis original + los mensajes previos
             historial = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_messages[:-1]])
-            ctx_chat = f"Informe/Análisis clínico base:\n{st.session_state.resultado_analisis}\n\nHistorial de conversación:\n{historial}\n\nResponde a esta nueva duda del médico/enfermero de forma concisa y estricta: {query}"
+            ctx_chat = f"DIRECTRIZ SUPREMA: Eres una IA médica estricta. Responde sin inventar datos.\n\nInforme clínico base:\n{st.session_state.resultado_analisis}\n\nHistorial de conversación:\n{historial}\n\nResponde a esta nueva duda del médico/enfermero de forma concisa y estricta: {query}"
             
             resp = chat_model.generate_content(
                 ctx_chat, 
                 safety_settings=MEDICAL_SAFETY_SETTINGS,
-                generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10} # Misma seguridad matemática
+                generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10} 
             )
             
-            # Guardar la respuesta de la IA
             st.session_state.chat_messages.append({"role": "assistant", "content": resp.text})
             
         except Exception as e:
             st.session_state.chat_messages.append({"role": "assistant", "content": f"Error del servidor: {e}"})
             
-        # Forzar recarga para que se dibuje el nuevo mensaje
         st.rerun()
