@@ -297,7 +297,7 @@ with col_c:
     if modo == "📚 Agente Investigador (PubMed)":
         st.info("🤖 **Agente Activo:** Conectado a PubMed.")
         query_pubmed = st.text_input("🔍 Duda clínica a investigar:")
-        with st.expander("📝 Notas Clínicas / Contexto", expanded=False):
+        with st.expander("📝 Notas Clínicas", expanded=False):
             notas = st.text_area("Contexto:", height=70, label_visibility="collapsed")
     else:
         fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
@@ -307,7 +307,8 @@ with col_c:
                 elif "pdf" in f.type: archivos.append(("doc", f))
                 else: archivos.append(("img", f))
                 
-        with st.expander("📝 Notas Clínicas / Preguntas Específicas", expanded=False):
+        # --- CAMBIO REALIZADO: Quitamos "Preguntas Específicas" del título ---
+        with st.expander("📝 Notas Clínicas / Preguntas", expanded=False):
             notas = st.text_area("Notas", height=70, placeholder="Escribe el contexto del paciente...", label_visibility="collapsed")
             
         with st.expander("🎙️ Adjuntar Nota de Voz", expanded=False):
@@ -362,7 +363,6 @@ with col_c:
                             vp = tf.name
                             st.session_state.last_video_path = vp
                             
-                        # --- FIX: POCUS SÓLO SE ACTIVA SI SELECCIONAS ECOGRAFÍA EXPLÍCITAMENTE ---
                         if "POCUS" in modo:
                             st.toast("Activando God Mode POCUS...")
                             mm, eb, met = procesar_pocus_v6_singularidad(vp)
@@ -411,6 +411,7 @@ with col_c:
                 else:
                     instruccion_anatomia = f"El usuario especifica que la zona es: {st.session_state.punto_cuerpo}. Basa tu análisis en ello."
 
+                # --- CAMBIO REALIZADO: Cuidados de Enfermería al final del HTML ---
                 prompt = f"""
                 Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
                 Contexto: {contexto}. Especialidad: {modo}.
@@ -429,8 +430,8 @@ with col_c:
                 FORMATO HTML REQUERIDO:
                 <details class="diagnosis-box" open><summary>🚨 HALLAZGOS Y RAZONAMIENTO</summary><p><b>[Diagnóstico]</b>. [Tu análisis]</p></details>
                 <details class="action-box" open><summary>⚡ ACCIÓN INMEDIATA</summary><p>[Plan médico]</p></details>
-                <details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Plan de cuidados específicos]</p></details>
                 <details class="{'pubmed-box' if 'PubMed' in modo else 'material-box'}" open><summary>🛠️ TRATAMIENTO Y SEGUIMIENTO</summary><p>[Desarrollo de tratamiento a largo plazo]</p></details>
+                <details class="pocus-box" open><summary>👩‍⚕️ CUIDADOS DE ENFERMERÍA</summary><p>[Plan de cuidados específicos]</p></details>
                 """
                 
                 res = model.generate_content([prompt, *con] if con else prompt, safety_settings=MEDICAL_SAFETY_SETTINGS)
