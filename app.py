@@ -15,7 +15,7 @@ import pandas as pd
 import urllib.request
 import json
 import xml.etree.ElementTree as ET
-import plotly.express as px  # <-- NUEVO: Para el visor interactivo
+import plotly.express as px
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
@@ -85,19 +85,17 @@ if not st.session_state.autenticado:
         st.stop()
 
 # ==========================================
-#      NUEVO: ANONIMIZACIÓN RGPD (Rostros)
+#      ANONIMIZACIÓN RGPD (Rostros)
 # ==========================================
 def anonimizar_imagen(img_pil):
     """Detecta rostros y los difumina para cumplir con protección de datos"""
     try:
         img_cv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-        # Cargamos el detector frontal básico de OpenCV
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
         rostros = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
         
         for (x, y, w, h) in rostros:
-            # Extraemos la región del rostro y aplicamos un desenfoque muy fuerte
             roi = img_cv[y:y+h, x:x+w]
             roi_blur = cv2.GaussianBlur(roi, (99, 99), 30)
             img_cv[y:y+h, x:x+w] = roi_blur
@@ -105,10 +103,10 @@ def anonimizar_imagen(img_pil):
         return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
     except Exception as e:
         print(f"Error RGPD Anonymizer: {e}")
-        return img_pil # Si falla, devuelve la original para no bloquear el análisis
+        return img_pil
 
 # ==========================================
-#      NUEVO: CACHÉ PARA MOTOR MOBILE SAM 1
+#      CACHÉ PARA MOTOR MOBILE SAM 1
 # ==========================================
 @st.cache_resource
 def load_sam_model():
@@ -310,12 +308,20 @@ with col_l:
             st.session_state.modelos_disponibles = [m.name.replace('models/','') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     except: st.session_state.modelos_disponibles = ["gemini-1.5-flash"]
     
+    # --- FIX: Búsqueda estricta de "preview" para Gemini 3 ---
     idx_defecto = 0
     if st.session_state.modelos_disponibles:
+        # Primero buscamos el que tenga flash y preview juntos
         for i, modelo in enumerate(st.session_state.modelos_disponibles):
-            if "gemini-3" in modelo.lower() and "flash" in modelo.lower():
+            if "gemini-3" in modelo.lower() and "flash" in modelo.lower() and "preview" in modelo.lower():
                 idx_defecto = i
                 break
+        else:
+            # Fallback por si acaso Google le cambia el nombre y le quita el "preview"
+            for i, modelo in enumerate(st.session_state.modelos_disponibles):
+                if "gemini-3" in modelo.lower() and "flash" in modelo.lower():
+                    idx_defecto = i
+                    break
                 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", st.session_state.modelos_disponibles, index=idx_defecto)
     st.session_state.punto_cuerpo = st.selectbox("Anatomía:", ["✨ Autodetectar", "Cara", "Pecho", "Abdomen", "Sacro", "Pierna", "Pie"])
@@ -334,13 +340,12 @@ with col_c:
         with st.expander("📝 Notas Clínicas", expanded=False):
             notas = st.text_area("Contexto:", height=70, label_visibility="collapsed")
     else:
-        tab1, tab2 = st.tabs(["📁 Subir Archivos", "📸 Tomar Foto"])
+        metodo_captura = st.radio("Método de entrada", ["📁 Subir Archivos", "📸 Tomar Foto"], horizontal=True, label_visibility="collapsed")
         
-        with tab1:
+        if metodo_captura == "📁 Subir Archivos":
             fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
             st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
-        
-        with tab2:
+        elif metodo_captura == "📸 Tomar Foto":
             cam_pic = st.camera_input("Cámara")
             
         if fs:
@@ -425,7 +430,6 @@ with col_c:
                     elif tipo == "doc":
                         txt_docs += "".join([p.extract_text() for p in pypdf.PdfReader(f).pages])
                     elif tipo == "img":
-                        # Carga y anonimización de la imagen RGPD
                         img_raw = ImageOps.exif_transpose(Image.open(f)).convert("RGB")
                         img = anonimizar_imagen(img_raw)
                         
@@ -488,7 +492,7 @@ with col_c:
                     st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
                     frame_extraido, raw_txt = extraer_frame_video(st.session_state.last_video_path, raw_txt)
                     if frame_extraido:
-                        img_base_para_bbox = anonimizar_imagen(frame_extraido) # Anonimizar frame
+                        img_base_para_bbox = anonimizar_imagen(frame_extraido)
                 
                 if img_base_para_bbox and not sam_utilizado:
                     im_m, clean_t, det = extraer_y_dibujar_bboxes(raw_txt, img_base_para_bbox)
@@ -524,13 +528,11 @@ with col_r:
             
         if st.session_state.get("img_marcada"):
             st.markdown("#### 🎯 Fotograma / Visión IA")
-            # --- NUEVO VISOR INTERACTIVO CON PLOTLY ---
             try:
                 fig = px.imshow(st.session_state.img_marcada)
                 fig.update_layout(coloraxis_showscale=False, margin=dict(l=0, r=0, t=0, b=0), xaxis_visible=False, yaxis_visible=False)
                 st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
             except Exception as e:
-                # Fallback por si hay algún error con la librería gráfica
                 st.image(st.session_state.img_marcada, use_container_width=True)
 
 # ==========================================
