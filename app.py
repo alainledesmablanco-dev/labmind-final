@@ -344,7 +344,6 @@ with col_c:
         
         if metodo_captura == "📁 Subir Archivos":
             fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
-            st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
         elif metodo_captura == "📸 Tomar Foto":
             cam_pic = st.camera_input("Cámara")
             
