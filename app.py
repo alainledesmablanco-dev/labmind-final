@@ -308,23 +308,42 @@ with col_l:
             st.session_state.modelos_disponibles = [m.name.replace('models/','') for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
     except: st.session_state.modelos_disponibles = ["gemini-1.5-flash"]
     
-    # --- FIX: Búsqueda estricta de "preview" para Gemini 3 ---
     idx_defecto = 0
     if st.session_state.modelos_disponibles:
-        # Primero buscamos el que tenga flash y preview juntos
         for i, modelo in enumerate(st.session_state.modelos_disponibles):
             if "gemini-3" in modelo.lower() and "flash" in modelo.lower() and "preview" in modelo.lower():
                 idx_defecto = i
                 break
         else:
-            # Fallback por si acaso Google le cambia el nombre y le quita el "preview"
             for i, modelo in enumerate(st.session_state.modelos_disponibles):
                 if "gemini-3" in modelo.lower() and "flash" in modelo.lower():
                     idx_defecto = i
                     break
                 
     st.session_state.modelo_seleccionado = st.selectbox("Versión de Gemini:", st.session_state.modelos_disponibles, index=idx_defecto)
-    st.session_state.punto_cuerpo = st.selectbox("Anatomía:", ["✨ Autodetectar", "Cara", "Pecho", "Abdomen", "Sacro", "Pierna", "Pie"])
+    
+    # --- NUEVO LISTADO DE ANATOMÍA COMPLETO ---
+    lista_anatomia = [
+        "✨ Autodetectar", 
+        "Cabeza", 
+        "Cara", 
+        "Cuello", 
+        "Tórax", 
+        "Espalda", 
+        "Abdomen",
+        "Pelvis", 
+        "Genitales", 
+        "Glúteo", 
+        "Sacro", 
+        "Brazo",
+        "Antebrazo",
+        "muñeca",
+        "Mano", 
+        "Muslo", 
+        "Pierna", 
+        "Pie"
+    ]
+    st.session_state.punto_cuerpo = st.selectbox("Anatomía:", lista_anatomia)
 
 with col_c:
     st.subheader("1. Selección de Modo")
