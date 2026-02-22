@@ -361,10 +361,17 @@ with col_c:
     notas = ""
     
     if modo == "📚 Agente Investigador (PubMed)":
-        st.info("🤖 **Agente Activo:** Conectado a PubMed.")
-        query_pubmed = st.text_input("🔍 Duda clínica a investigar:")
-        with st.expander("📝 Notas Clínicas", expanded=False):
-            notas = st.text_area("Contexto:", height=70, label_visibility="collapsed")
+        st.info("🤖 **Agente Clínico y Farmacológico**")
+        
+        # --- FIX V140: MICRÓFONO PRINCIPAL SIEMPRE VISIBLE ---
+        if hasattr(st, "audio_input"):
+            audio_val = st.audio_input("🎙️ Dictar duda clínica")
+        else:
+            st.warning("⚠️ Tu servidor necesita actualizar Streamlit para usar la grabadora de voz.")
+            
+        with st.expander("📝 Búsqueda Avanzada (Opcional)", expanded=False):
+            query_pubmed = st.text_input("🔍 Buscar en PubMed (Ej: collagenase silver):")
+            notas = st.text_area("Notas extra:", height=70, placeholder="Contexto del paciente...", label_visibility="collapsed")
     else:
         metodo_captura = st.radio("Método de entrada", ["📁 Subir Archivos", "📸 Tomar Foto"], horizontal=True, label_visibility="collapsed")
         
@@ -421,8 +428,11 @@ with col_c:
                 imagen_para_visor = None
                 video_presente = False
                 
-                if modo == "📚 Agente Investigador (PubMed)" and query_pubmed:
-                    txt_docs += buscar_en_pubmed(query_pubmed)
+                if modo == "📚 Agente Investigador (PubMed)":
+                    # Usamos `.get` de forma segura por si query_pubmed no está definido al no usar el expander
+                    q_val = locals().get('query_pubmed', '')
+                    if q_val:
+                        txt_docs += buscar_en_pubmed(q_val)
                     
                 if audio_val:
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tf_audio:
@@ -477,8 +487,8 @@ with col_c:
                 # --- CONFIGURACIÓN DE BBOX ---
                 if sam_utilizado:
                     instruccion_bbox = "La imagen ya ha sido segmentada milimétricamente. NO devuelvas BBOX."
-                elif modo == "🩸 Analíticas (God Mode)":
-                    instruccion_bbox = "INSTRUCCIÓN: Estás analizando documentos/analíticas. NO devuelvas ni calcules coordenadas BBOX bajo ningún concepto."
+                elif modo in ["🩸 Analíticas (God Mode)", "📚 Agente Investigador (PubMed)"]:
+                    instruccion_bbox = "INSTRUCCIÓN: Estás en modo de análisis de texto o investigación. NO devuelvas ni calcules coordenadas BBOX bajo ningún concepto."
                 else:
                     if video_presente:
                         instruccion_bbox = "INSTRUCCIÓN DE RADIOLOGÍA DINÁMICA: Estás analizando un VÍDEO. Si detectas patología, busca el fotograma donde se vea más clara. Al final de tu texto, imprime UNA SOLA VEZ el segundo exacto y sus coordenadas así: FRAME: [segundos] BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto."
@@ -490,7 +500,7 @@ with col_c:
                 else:
                     instruccion_anatomia = f"El usuario especifica que la zona es: {st.session_state.punto_cuerpo}. Basa tu análisis en ello."
 
-                # --- INSTRUCCIONES ESPECÍFICAS ULTRA GOD MODE ---
+                # --- INSTRUCCIONES ESPECÍFICAS Y HTML ---
                 instrucciones_especificas = ""
                 html_requerido = ""
                 
@@ -520,7 +530,6 @@ with col_c:
 </details>
 """
                 elif modo == "🩸 Analíticas (God Mode)":
-                    # ULTRA GOD MODE ANALÍTICAS
                     instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE ANALÍTICAS: Eres un experto intensivista y bioquímico clínico. 1. Busca patrones ocultos. 2. Si dispones de los datos numéricos, CALCULA OBLIGATORIAMENTE y muestra: Anion Gap, Gap Osmolar, Calcio corregido por albúmina y filtrado glomerular estimado (CKD-EPI). 3. Identifica el trastorno ácido-base primario y las compensaciones esperadas. 4. Advierte explícitamente sobre posibles errores pre-analíticos (ej. hemólisis falsa hiperpotasemia) o cascadas de fallo orgánico inminente."
                     html_requerido = """
 <details class="diagnosis-box" open>
@@ -544,7 +553,6 @@ with col_c:
 </details>
 """
                 elif modo == "🧠 Medicina Interna (Holístico)":
-                    # ULTRA GOD MODE INTERNA
                     instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE INTERNA: Actúa como Jefe de Servicio de Medicina Interna de un hospital terciario. Tienes una visión holística. 1. SÍNTESIS: Cruza TODOS los datos (analíticas, imágenes, electros, notas clínicas). 2. NAVAJA DE OCKHAM: Busca y prioriza un diagnóstico principal y unificador que explique la totalidad de los hallazgos. 3. DICTUM DE HICKAM: Propón un diagnóstico diferencial riguroso por si coexisten patologías. 4. ESTRATIFICACIÓN VITAL: Define el nivel de gravedad (candidato a alta, planta, UCI o medidas paliativas)."
                     html_requerido = """
 <details class="diagnosis-box" open>
@@ -565,6 +573,25 @@ with col_c:
 <details class="pocus-box" open>
 <summary>👩‍⚕️ PLAN DE CUIDADOS (ENFERMERÍA)</summary>
 <p>[Cuidados a pie de cama, monitorización holística y prevención de complicaciones]</p>
+</details>
+"""
+                elif modo == "📚 Agente Investigador (PubMed)":
+                    # --- FIX V140: CEREBRO DESBLOQUEADO PARA RESPONDER AL AUDIO ---
+                    instrucciones_especificas = "- INSTRUCCIÓN AGENTE CLÍNICO: Eres un experto farmacólogo e investigador. ESCUCHA ATENTAMENTE EL AUDIO ADJUNTO. El usuario te está planteando una duda verbalmente. Si no hay abstracts o texto de PubMed, NO TE DISCULPES; usa tu inmensa base de conocimiento médico interno para responder a la duda clínica o de interacción de fármacos directamente. Dale la respuesta definitiva basándote en evidencia."
+                    html_requerido = """
+<details class="pubmed-box" open>
+<summary>📚 RESPUESTA CLÍNICA Y EVIDENCIA</summary>
+<p><b>[Conclusión Directa]</b>. [Tu respuesta clara y directa a la duda planteada en el audio o texto]</p>
+</details>
+
+<details class="radiomics-box" open>
+<summary>🔬 FARMACOLOGÍA / FISIOPATOLOGÍA</summary>
+<p>[Explicación científica profunda: Mecanismos de acción, interacciones farmacológicas o resumen de los estudios aplicables]</p>
+</details>
+
+<details class="action-box" open>
+<summary>⚖️ RECOMENDACIÓN PRÁCTICA (CUIDADOS)</summary>
+<p>[Cómo aplicar esto en el paciente a pie de cama: precauciones, consejos de curas y advertencias de seguridad]</p>
 </details>
 """
                 else:
@@ -594,12 +621,12 @@ with col_c:
                 Rol: Especialista Senior en Diagnóstico por Imagen, Medicina de Precisión y Cuidados de Enfermería.
                 Contexto: {contexto}. Especialidad: {modo}.
                 Usuario (Notas): "{notas}"
-                Datos: {txt_docs[:5000]}
+                Datos PubMed/Textos: {txt_docs[:5000]}
 
                 RAZONAMIENTO EN CADENA:
-                1. EXAMEN VISUAL/DATOS: Describe brevemente qué ves en la prueba o datos aportados.
-                2. IDENTIFICACIÓN DE HALLAZGOS: Busca signos patológicos o valores críticos.
-                3. JUICIO CLÍNICO: Emite el diagnóstico basado estrictamente en la evidencia.
+                1. ANÁLISIS: Analiza profundamente la prueba, el texto, o el AUDIO aportado por el usuario.
+                2. IDENTIFICACIÓN: Busca signos patológicos, interacciones o dudas específicas.
+                3. JUICIO CLÍNICO: Emite el diagnóstico o la respuesta científica final.
                 
                 REGLAS EXTRA:
                 - {instruccion_bbox}
