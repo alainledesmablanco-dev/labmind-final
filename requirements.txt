@@ -9,7 +9,7 @@ pandas
 extra-streamlit-components
 ultralytics
 plotly
-
+pytesseract
 
 
 
