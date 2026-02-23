@@ -371,12 +371,15 @@ with col_c:
         "✨ Autodetectar", 
         "🧠 Medicina Interna (Holístico)", 
         "🩸 Analíticas (God Mode)", 
-        "🩹 Heridas / Úlceras", 
+        "🩹 Heridas / Úlceras",
+        "🧴 Dermatología"
+        "📈 ECG",
+        "💀 RX/TAC/RMN", 
         "🦇 Ecografía / POCUS", 
         "📚 Agente Investigador (PubMed)", 
-        "📈 ECG", 
-        "💀 RX/TAC", 
-        "🧴 Dermatología"
+         
+         
+        
     ]
     modo = st.selectbox("Especialidad:", lista_modos)
     contexto = st.selectbox("🏥 Contexto:", ["Urgencias", "Hospitalización", "UCI", "Residencia", "Domicilio"], index=1)
@@ -401,7 +404,6 @@ with col_c:
         
         if metodo_captura == "📁 Subir Archivos":
             fs = st.file_uploader("Archivos Clínicos:", type=['jpg','png','pdf','mp4','mov'], accept_multiple_files=True)
-            st.caption("📱 *En móviles, presiona arriba para grabar vídeo directamente.*")
         elif metodo_captura == "📸 Tomar Foto":
             cam_pic = st.camera_input("Cámara")
             
