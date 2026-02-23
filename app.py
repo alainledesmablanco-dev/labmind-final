@@ -1,4 +1,4 @@
-import streamlit as st
+ort streamlit as st
 import google.generativeai as genai
 from PIL import Image, ImageOps
 import pypdf
@@ -372,7 +372,7 @@ with col_c:
         "🧠 Medicina Interna (Holístico)", 
         "🩸 Analíticas (God Mode)", 
         "🩹 Heridas / Úlceras",
-        "🧴 Dermatología"
+        "🧴 Dermatología",
         "📈 ECG",
         "💀 RX/TAC/RMN", 
         "🦇 Ecografía / POCUS", 
