@@ -1,4 +1,4 @@
-ort streamlit as st
+import streamlit as st
 import google.generativeai as genai
 from PIL import Image, ImageOps
 import pypdf
@@ -376,7 +376,7 @@ with col_c:
         "📈 ECG",
         "💀 RX/TAC/RMN", 
         "🦇 Ecografía / POCUS", 
-        "📚 Agente Investigador (PubMed)", 
+        "📚 Agente Investigador (PubMed)" 
          
          
         
