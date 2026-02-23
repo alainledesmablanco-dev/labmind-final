@@ -145,11 +145,12 @@ def anonimizar_imagen(img_pil, modo):
 def load_sam_model():
     try:
         from ultralytics import SAM
-        if os.path.exists('mobile_sam.pt'):
-            return SAM('mobile_sam.pt')
+        # Al quitar el "if os.path.exists", forzamos a que Streamlit Cloud 
+        # descargue el modelo automáticamente de internet la primera vez.
+        return SAM('mobile_sam.pt')
     except Exception as e:
         print(f"Fallo al cargar SAM en caché: {e}")
-    return None
+        return None
 
 def segmentar_herida_sam_v2(img_pil):
     try:
