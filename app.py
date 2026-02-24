@@ -64,7 +64,6 @@ MEDICAL_SAFETY_SETTINGS = [
 cookie_manager = stx.CookieManager()
 time.sleep(0.1)
 
-# Se reemplaza la clave de claude por la de groq en el estado
 for key in ["autenticado", "api_key", "api_key_groq", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "last_video_path"]:
     if key not in st.session_state: st.session_state[key] = [] if key in ["chat_messages", "modelos_disponibles"] else None
 if "autenticado" not in st.session_state or not st.session_state.autenticado:
@@ -89,15 +88,13 @@ if not st.session_state.autenticado:
         if st.button("Entrar", type="primary"):
             if k:
                 expires = datetime.datetime.now() + datetime.timedelta(days=30)
-                # Le añadimos un key único al guardado de Google
                 cookie_manager.set("labmind_secret_key", k, expires_at=expires, key="set_cookie_gemini")
                 st.session_state.api_key = k
                 if k_groq:
-                    # Le añadimos un key único al guardado de Groq
                     cookie_manager.set("labmind_groq_key", k_groq, expires_at=expires, key="set_cookie_groq")
                     st.session_state.api_key_groq = k_groq
                 st.session_state.autenticado = True
-                time.sleep(0.5) # Pausa de medio segundo para que guarde ambas bien
+                time.sleep(0.5) 
                 st.rerun()
             else:
                 st.error("La API Key de Google es obligatoria.")
@@ -145,8 +142,6 @@ def anonimizar_imagen(img_pil, modo):
 def load_sam_model():
     try:
         from ultralytics import SAM
-        # Al quitar el "if os.path.exists", forzamos a que Streamlit Cloud 
-        # descargue el modelo automáticamente de internet la primera vez.
         return SAM('mobile_sam.pt')
     except Exception as e:
         print(f"Fallo al cargar SAM en caché: {e}")
@@ -378,9 +373,6 @@ with col_c:
         "💀 RX/TAC/RMN", 
         "🦇 Ecografía / POCUS", 
         "📚 Agente Investigador (PubMed)" 
-         
-         
-        
     ]
     modo = st.selectbox("Especialidad:", lista_modos)
     contexto = st.selectbox("🏥 Contexto:", ["Urgencias", "Hospitalización", "UCI", "Residencia", "Domicilio"], index=1)
@@ -446,7 +438,7 @@ with col_c:
         st.session_state.sam_metrics = {}
         st.session_state.chat_messages = []
         
-        with st.spinner("IA #1 (Gemini): Procesando pruebas y generando borrador..."):
+        with st.spinner("IA #1 (Gemini): Procesando pruebas y escaneando imagen..."):
             try:
                 model = genai.GenerativeModel(st.session_state.modelo_seleccionado)
                 con = []
@@ -510,16 +502,16 @@ with col_c:
                             con.append(img)
                         if not imagen_para_visor: imagen_para_visor = img
 
-                # --- CONFIGURACIÓN DE BBOX ---
+                # --- FIX V153: REAJUSTE DE INSTRUCCIÓN BBOX ---
                 if sam_utilizado:
                     instruccion_bbox = "La imagen ya ha sido segmentada milimétricamente. NO devuelvas BBOX."
                 elif modo in ["🩸 Analíticas (God Mode)", "📚 Agente Investigador (PubMed)"]:
-                    instruccion_bbox = "INSTRUCCIÓN: Estás en modo de análisis de texto o investigación. NO devuelvas ni calcules coordenadas BBOX bajo ningún concepto."
+                    instruccion_bbox = "Estás en modo de análisis de texto. NO devuelvas ni calcules coordenadas BBOX bajo ningún concepto."
                 else:
                     if video_presente:
-                        instruccion_bbox = "INSTRUCCIÓN DE RADIOLOGÍA DINÁMICA: Estás analizando un VÍDEO. Si detectas patología, busca el fotograma donde se vea más clara. Al final de tu texto, imprime UNA SOLA VEZ el segundo exacto y sus coordenadas así: FRAME: [segundos] BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto."
+                        instruccion_bbox = "INSTRUCCIÓN DE RADIOLOGÍA DINÁMICA: Estás analizando un VÍDEO. Si detectas patología, busca el fotograma donde se vea más clara. Al final del todo, fuera del HTML, imprime el segundo exacto y sus coordenadas así: FRAME: [segundos] BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto."
                     else:
-                        instruccion_bbox = "INSTRUCCIÓN DE ANCLAJE ESPACIAL: Si detectas patología, usa tu anclaje visual nativo para marcarla. Imprime esto UNA SOLA VEZ al final: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto."
+                        instruccion_bbox = "INSTRUCCIÓN DE ANCLAJE ESPACIAL: Si detectas patología en la imagen, usa tu anclaje visual para marcarla. Imprime esto UNA SOLA VEZ al final del todo de tu respuesta, fuera del HTML: BBOX: [ymin, xmin, ymax, xmax] LABEL: TuTexto."
 
                 if st.session_state.punto_cuerpo == "✨ Autodetectar":
                     instruccion_anatomia = "Deduce visualmente la zona anatómica."
@@ -646,7 +638,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 </details>
 """
 
-                # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO GEMINI) ---
+                # --- FIX V153: PROMPT AGENTE 1 EN 2 PARTES SEPARADAS ---
                 prompt_adjunto = f"""
                 DIRECTRIZ SUPREMA: Eres LabMind, una IA de grado médico estricto. NO INVENTES DATOS.
 
@@ -655,20 +647,25 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 Datos Aportados: {txt_docs[:15000]}
 
                 CADENA DE VERIFICACIÓN OBLIGATORIA (CoVe):
-                1. Analizar evidencias.
-                2. Formular hipótesis.
+                1. Analizar evidencias visuales y textuales minuciosamente.
+                2. Formular hipótesis diagnóstica.
                 3. AUTOCRÍTICA: Cuestiona tu hipótesis. ¿Faltan datos? 
                 4. CÁLCULO DE CERTEZA: Asigna un porcentaje real de fiabilidad a tu respuesta (0% a 100%).
                 
                 REGLAS EXTRA:
-                - {instruccion_bbox}
                 - {instruccion_anatomia}
                 - ANCLAJE DE DATOS ESTRICTO: Para describir al paciente, básate ÚNICA Y EXCLUSIVAMENTE en los Datos aportados.
                 - CLÁUSULA DE IGNORANCIA: Si la imagen o los datos son insuficientes, dilo explícitamente y baja tu % de Certeza.
                 {instrucciones_especificas}
 
-                FORMATO HTML OBLIGATORIO (Rellena los corchetes sin usar ```html):
+                ESTRUCTURA DE TU RESPUESTA OBLIGATORIA (2 PARTES):
+                
+                PARTE 1 (INFORME CLÍNICO):
+                Copia y rellena exactamente este bloque HTML (sin usar markdown de código ni ```html):
                 {html_requerido}
+                
+                PARTE 2 (VISIÓN ARTIFICIAL Y ANCLAJE ESPACIAL):
+                {instruccion_bbox} (Asegúrate de escribir estas coordenadas al final del todo de tu respuesta, en una línea nueva y fuera de las etiquetas HTML).
                 """
                 
                 # EJECUCIÓN AGENTE 1 (GEMINI)
@@ -678,10 +675,30 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                     generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
                 )
                 
-                raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
+                raw_txt_inicial_completo = res_adjunto.text
+                
+                # --- EXTRAER COORDENADAS (BBOX) ANTES DE LA AUDITORÍA ---
+                img_base_para_bbox = imagen_para_visor
+                texto_sin_tags = raw_txt_inicial_completo
+                
+                if video_presente and st.session_state.get("last_video_path") and "FRAME:" in texto_sin_tags:
+                    st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
+                    frame_extraido, texto_sin_tags = extraer_frame_video(st.session_state.last_video_path, texto_sin_tags)
+                    if frame_extraido:
+                        img_base_para_bbox = anonimizar_imagen(frame_extraido, modo)
+                
+                if img_base_para_bbox and not sam_utilizado:
+                    im_m, texto_sin_tags, det = extraer_y_dibujar_bboxes(texto_sin_tags, img_base_para_bbox)
+                    if det:
+                        st.session_state.img_marcada = im_m
+                    elif not st.session_state.img_marcada:
+                        st.session_state.img_marcada = img_base_para_bbox
+
+                # Preparamos el HTML limpio sin etiquetas de visión para que Llama 3 no se confunda y las borre
+                raw_txt_inicial = texto_sin_tags.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- FIX V150: AUDITORÍA CLÍNICA CRUZADA CON GROQ (LLAMA 3.3) ---
+                # --- AUDITORÍA CLÍNICA CRUZADA CON GROQ (LLAMA 3.3) ---
                 prompt_auditor = f"""
                 Eres el JEFE DE SERVICIO MÉDICO (Auditor Clínico Estricto).
                 Un médico adjunto (IA) acaba de evaluar a un paciente basándose en datos, generando este informe:
@@ -703,7 +720,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 NO añadas saludos, ni explicaciones previas. NO escribas ```html. Devuelve SOLO el código final de las tarjetas HTML.
                 """
 
-                raw_txt = ""
+                raw_txt_final = ""
                 
                 if st.session_state.get("api_key_groq"):
                     # USAMOS GROQ (LLAMA 3) GRATIS
@@ -721,12 +738,12 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                             temperature=0.0,
                             max_tokens=2500,
                         )
-                        raw_txt = chat_completion.choices[0].message.content
+                        raw_txt_final = chat_completion.choices[0].message.content
                     except Exception as e:
                         print(f"Error Groq: {e}")
                         st.toast("⚠️ Fallo en Groq. Gemini asume la auditoría final.")
                         res_auditor = model.generate_content(prompt_auditor, generation_config={"temperature": 0.0})
-                        raw_txt = res_auditor.text
+                        raw_txt_final = res_auditor.text
                 else:
                     # GEMINI SE AUDITA A SÍ MISMO
                     st.toast("🕵️‍♂️ IA #2 (Gemini): Auto-verificando el informe preliminar...")
@@ -735,30 +752,13 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                         safety_settings=MEDICAL_SAFETY_SETTINGS,
                         generation_config={"temperature": 0.0, "top_p": 0.8, "top_k": 10}
                     )
-                    raw_txt = res_auditor.text
+                    raw_txt_final = res_auditor.text
 
                 # LIMPIEZA FINAL DEL HTML DEL AUDITOR
-                raw_txt = raw_txt.replace("```html", "").replace("```", "").strip()
-                raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
+                raw_txt_final = raw_txt_final.replace("```html", "").replace("```", "").strip()
+                raw_txt_final = raw_txt_final[raw_txt_final.find("<details"):] if "<details" in raw_txt_final else raw_txt_final
 
-                # --- EXTRACCIÓN DE FOTOGRAMAS Y BBOX (Mantenido) ---
-                img_base_para_bbox = imagen_para_visor
-                
-                if video_presente and st.session_state.get("last_video_path") and "FRAME:" in raw_txt:
-                    st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
-                    frame_extraido, raw_txt = extraer_frame_video(st.session_state.last_video_path, raw_txt)
-                    if frame_extraido:
-                        img_base_para_bbox = anonimizar_imagen(frame_extraido, modo)
-                
-                if img_base_para_bbox and not sam_utilizado:
-                    im_m, clean_t, det = extraer_y_dibujar_bboxes(raw_txt, img_base_para_bbox)
-                    if det:
-                        st.session_state.img_marcada = im_m
-                    elif not st.session_state.img_marcada:
-                        st.session_state.img_marcada = img_base_para_bbox
-                    raw_txt = clean_t
-
-                st.session_state.resultado_analisis = raw_txt
+                st.session_state.resultado_analisis = raw_txt_final
                 st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
             except Exception as e: 
                 st.error(f"Error procesando el análisis: {e}")
