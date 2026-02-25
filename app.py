@@ -18,6 +18,8 @@ import xml.etree.ElementTree as ET
 import plotly.express as px
 import base64
 import io
+import requests
+from openai import OpenAI
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
@@ -66,35 +68,35 @@ MEDICAL_SAFETY_SETTINGS = [
 cookie_manager = stx.CookieManager()
 time.sleep(0.1)
 
-for key in ["autenticado", "api_key", "api_key_groq", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "modelos_groq", "last_video_path"]:
-    if key not in st.session_state: st.session_state[key] = [] if key in ["chat_messages", "modelos_disponibles", "modelos_groq"] else None
+for key in ["autenticado", "api_key", "api_key_or", "resultado_analisis", "pdf_bytes", "chat_messages", "img_marcada", "video_bytes", "modelos_disponibles", "modelos_or", "last_video_path"]:
+    if key not in st.session_state: st.session_state[key] = [] if key in ["chat_messages", "modelos_disponibles", "modelos_or"] else None
 if "autenticado" not in st.session_state or not st.session_state.autenticado:
     st.session_state.autenticado = False
 if "pocus_metrics" not in st.session_state: st.session_state.pocus_metrics = {}
 if "sam_metrics" not in st.session_state: st.session_state.sam_metrics = {}
 
 cookie_api_key = cookie_manager.get(cookie="labmind_secret_key")
-cookie_api_key_groq = cookie_manager.get(cookie="labmind_groq_key")
+cookie_api_key_or = cookie_manager.get(cookie="labmind_or_key")
 
 if not st.session_state.autenticado:
     if cookie_api_key:
         st.session_state.api_key = cookie_api_key
-        if cookie_api_key_groq:
-            st.session_state.api_key_groq = cookie_api_key_groq
+        if cookie_api_key_or:
+            st.session_state.api_key_or = cookie_api_key_or
         st.session_state.autenticado = True
         st.rerun()
     else:
         st.title("LabMind Acceso")
         k = st.text_input("API Key Google (Gemini) [Obligatorio]:", type="password")
-        k_groq = st.text_input("API Key Groq (Llama 3) [Opcional para Doble IA - GRATIS]:", type="password")
+        k_or = st.text_input("API Key OpenRouter (Llama Vision) [Opcional para Doble IA - GRATIS]:", type="password")
         if st.button("Entrar", type="primary"):
             if k:
                 expires = datetime.datetime.now() + datetime.timedelta(days=30)
                 cookie_manager.set("labmind_secret_key", k, expires_at=expires, key="set_cookie_gemini")
                 st.session_state.api_key = k
-                if k_groq:
-                    cookie_manager.set("labmind_groq_key", k_groq, expires_at=expires, key="set_cookie_groq")
-                    st.session_state.api_key_groq = k_groq
+                if k_or:
+                    cookie_manager.set("labmind_or_key", k_or, expires_at=expires, key="set_cookie_or")
+                    st.session_state.api_key_or = k_or
                 st.session_state.autenticado = True
                 time.sleep(0.5)
                 st.rerun()
@@ -106,7 +108,6 @@ if not st.session_state.autenticado:
 #      FUNCIONES DE UTILIDAD Y BASE64
 # ==========================================
 def image_to_base64(img_pil):
-    """Convierte una imagen PIL a Base64 para Llama 3 Vision"""
     buffered = io.BytesIO()
     img_pil.convert('RGB').save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -359,35 +360,33 @@ with col_l:
     
     st.divider()
     st.subheader("🕵️‍♂️ Motor IA Auditor (Jefe)")
-    # --- CARGA DINÁMICA DE MODELOS GROQ ---
-    if st.session_state.get("api_key_groq"):
+    # --- CARGA DINÁMICA DE MODELOS OPENROUTER (SOLO GRATIS) ---
+    if st.session_state.get("api_key_or"):
         try:
-            import groq
-            client = groq.Groq(api_key=st.session_state.api_key_groq)
-            if not st.session_state.modelos_groq:
-                # Obtenemos la lista actual de modelos en Groq
-                st.session_state.modelos_groq = sorted([m.id for m in client.models.list().data])
+            if not st.session_state.modelos_or:
+                response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
+                if response.status_code == 200:
+                    data = response.json().get("data", [])
+                    # Filtramos SOLO los gratuitos para evitar disgustos y gastos accidentales
+                    st.session_state.modelos_or = sorted([m["id"] for m in data if "free" in m["id"].lower()])
             
-            idx_groq_defecto = 0
-            # Buscamos primero si hay alguno de visión
-            for i, mod in enumerate(st.session_state.modelos_groq):
-                if "vision" in mod.lower():
-                    idx_groq_defecto = i
+            # Si por algún motivo la API de OpenRouter falla temporalmente, cargamos el modelo manualmente:
+            if not st.session_state.modelos_or:
+                st.session_state.modelos_or = ["meta-llama/llama-3.2-11b-vision-instruct:free"]
+            
+            idx_or_defecto = 0
+            for i, mod in enumerate(st.session_state.modelos_or):
+                if "vision" in mod.lower() and "llama" in mod.lower():
+                    idx_or_defecto = i
                     break
-            else:
-                # Si no hay visión, buscamos el de 70b
-                for i, mod in enumerate(st.session_state.modelos_groq):
-                    if "70b" in mod.lower():
-                        idx_groq_defecto = i
-                        break
             
-            st.session_state.modelo_groq = st.selectbox("Versión de Llama (Groq):", st.session_state.modelos_groq, index=idx_groq_defecto)
-            st.success("✅ Auditoría Activa")
+            st.session_state.modelo_or = st.selectbox("Versión de Llama (OpenRouter):", st.session_state.modelos_or, index=idx_or_defecto)
+            st.success("✅ Auditoría Activa (OpenRouter)")
         except Exception as e:
-            st.error(f"Error cargando Groq: {e}")
-            st.session_state.modelo_groq = None
+            st.error(f"Error cargando OpenRouter: {e}")
+            st.session_state.modelo_or = None
     else:
-        st.info("ℹ️ Groq no configurado. Gemini se auto-auditará.")
+        st.info("ℹ️ OpenRouter no configurado. Gemini se auto-auditará.")
         
     st.divider()
     lista_anatomia = [
@@ -483,9 +482,9 @@ with col_c:
                 imagen_para_visor = None
                 video_presente = False
                 
-                # --- DETECCIÓN DINÁMICA DE CAPACIDAD DE VISIÓN EN GROQ ---
-                modelo_groq_actual = st.session_state.get("modelo_groq", "")
-                auditor_tiene_vision = "vision" in modelo_groq_actual.lower() if modelo_groq_actual else False
+                # --- DETECCIÓN DINÁMICA DE CAPACIDAD DE VISIÓN EN OPENROUTER ---
+                modelo_or_actual = st.session_state.get("modelo_or", "")
+                auditor_tiene_vision = "vision" in modelo_or_actual.lower() if modelo_or_actual else False
                 
                 if modo == "📚 Agente Investigador (PubMed)":
                     q_val = locals().get('query_pubmed', '')
@@ -562,7 +561,6 @@ with col_c:
                 instrucciones_especificas = ""
                 html_base_modo = ""
                 
-                # CREACIÓN DEL PUENTE VISUAL (SI NO HAY VISIÓN PERO SÍ IMAGEN)
                 puente_visual_html = ""
                 if not auditor_tiene_vision and imagen_para_visor and modo not in ["🩸 Analíticas (God Mode)", "📚 Agente Investigador (PubMed)"]:
                     puente_visual_html = """
@@ -688,7 +686,6 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 </details>
 """
 
-                # JUNTAMOS EL HTML FINAL
                 html_requerido = puente_visual_html + html_base_modo
 
                 # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO GEMINI) ---
@@ -716,7 +713,6 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 {html_requerido}
                 """
                 
-                # EJECUCIÓN AGENTE 1 (GEMINI)
                 res_adjunto = model.generate_content(
                     [prompt_adjunto, *con] if con else prompt_adjunto, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
@@ -726,27 +722,28 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- AUDITORÍA CLÍNICA HÍBRIDA (GROQ) ---
+                # --- AUDITORÍA CLÍNICA (OPENROUTER / LLAMA VISION) ---
                 raw_txt = ""
                 
-                if st.session_state.get("api_key_groq") and modelo_groq_actual:
-                    st.toast(f"🕵️‍♂️ IA #2 ({modelo_groq_actual}): Verificación cruzada en curso...")
+                if st.session_state.get("api_key_or") and modelo_or_actual:
+                    st.toast(f"🕵️‍♂️ IA #2 ({modelo_or_actual}): Verificación cruzada en curso...")
                     try:
-                        import groq
-                        client = groq.Groq(api_key=st.session_state.api_key_groq)
+                        client = OpenAI(
+                            base_url="[https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)",
+                            api_key=st.session_state.api_key_or,
+                        )
                         
                         if auditor_tiene_vision and imagen_para_visor:
-                            # MODO A: AUDITORÍA MULTIMODAL (EL AUDITOR VE LA FOTO)
+                            # MODO A: AUDITORÍA MULTIMODAL (OPENROUTER VE LA FOTO)
                             prompt_auditor = f"""
-                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Multimodal).
-                            Revisa este informe preliminar generado por tu adjunto:
+                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Multimodal). Revisa este HTML:
                             {raw_txt_inicial}
                             
                             TU MISIÓN ESTRICTA:
-                            Observa la imagen adjunta. ¿El "Diagnóstico" coincide EXACTAMENTE con lo que tú estás viendo?
-                            Si el adjunto describe algo que NO está en la foto (alucinación visual), CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML, baja drásticamente la Certeza y añade un aviso del error.
-                            Si es lógicamente impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al final del título de la primera tarjeta: " 👁️ <b>[Auditado por Llama Vision]</b>".
-                            No añadas saludos ni código markdown extra.
+                            1. Observa la imagen adjunta. ¿El "Diagnóstico" coincide EXACTAMENTE con lo que ves?
+                            2. Si el adjunto describe algo que NO está en la foto (alucinación visual), CORRIGE el texto, baja la Certeza y añade un aviso del error.
+                            3. Tienes ESTRICTAMENTE PROHIBIDO presentarte, explicar tus acciones o borrar el formato. Tu respuesta debe ser SOLO el HTML con las tarjetas.
+                            4. Si es lógicamente impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al título de la primera tarjeta: " 👁️ <b>[Auditado por Llama Vision]</b>".
                             """
                             base64_image = image_to_base64(imagen_para_visor)
                             content_user = [
@@ -754,38 +751,35 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                             ]
                         else:
-                            # MODO B: AUDITORÍA DE TEXTO/LÓGICA (EL AUDITOR NO VE LA FOTO)
+                            # MODO B: AUDITORÍA CIEGA (OPENROUTER NO VE LA FOTO, MODO FALLBACK)
                             prompt_auditor = f"""
-                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Lógico).
-                            Revisa este informe preliminar generado por tu adjunto:
+                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Lógico). Revisa este HTML:
                             {raw_txt_inicial}
                             
                             TU MISIÓN ESTRICTA:
-                            Tú NO puedes ver la imagen original, pero lee atentamente la sección de ANÁLISIS VISUAL CRUDO o las descripciones previas. 
-                            ¿El Diagnóstico propuesto está verdaderamente justificado por los detalles visuales y clínicos descritos?
-                            Si detectas un salto lógico o asunción peligrosa, CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML, baja la Certeza y avisa del error.
-                            Si es impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al título de la primera tarjeta: " ⚕️ <b>[Auditado por Llama {modelo_groq_actual[:10]}]</b>".
-                            No añadas saludos ni código markdown extra.
+                            1. Lee atentamente la sección de ANÁLISIS VISUAL CRUDO o las notas clínicas. ¿El Diagnóstico está justificado lógicamente?
+                            2. Tienes ESTRICTAMENTE PROHIBIDO presentarte, explicar tus acciones, charlar o borrar el formato. Tu respuesta debe ser SOLO código HTML.
+                            3. Si detectas un salto lógico, CORRIGE el diagnóstico y baja la Certeza.
+                            4. Si es impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al título: " ⚕️ <b>[Auditado por Llama]</b>".
                             """
-                            # Groq text models expect text strings directly, not arrays of dicts for user content
                             content_user = prompt_auditor
 
                         chat_completion = client.chat.completions.create(
+                            model=modelo_or_actual,
                             messages=[
-                                {"role": "system", "content": "Eres un auditor médico experto y estricto. Protege al paciente buscando errores."},
+                                {"role": "system", "content": "Eres un auditor médico experto y estricto. Responde única y exclusivamente con código HTML estructurado."},
                                 {"role": "user", "content": content_user}
                             ],
-                            model=modelo_groq_actual,
                             temperature=0.0,
                             max_tokens=2500,
                         )
                         raw_txt = chat_completion.choices[0].message.content
                     except Exception as e:
-                        print(f"Error Groq: {e}")
-                        st.toast("⚠️ Fallo en Groq. Usando solo el borrador de Gemini.")
+                        print(f"Error OpenRouter: {e}")
+                        st.toast("⚠️ Fallo en OpenRouter. Usando solo el borrador de Gemini.")
                         raw_txt = raw_txt_inicial
                 else:
-                    # GEMINI SE AUDITA A SÍ MISMO (MODO FALLBACK)
+                    # GEMINI SE AUDITA A SÍ MISMO
                     st.toast("🕵️‍♂️ IA #2 (Gemini): Auto-verificando el informe preliminar...")
                     prompt_auditor = f"Audita y corrige este informe si encuentras errores clínicos graves, manteniendo el HTML intacto:\n\n{raw_txt_inicial}"
                     res_auditor = model.generate_content(
@@ -795,25 +789,20 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                     )
                     raw_txt = res_auditor.text
 
-                # LIMPIEZA FINAL DEL HTML DEL AUDITOR
                 raw_txt = raw_txt.replace("```html", "").replace("```", "").strip()
                 raw_txt = raw_txt[raw_txt.find("<details"):] if "<details" in raw_txt else raw_txt
 
                 # --- EXTRACCIÓN DE FOTOGRAMAS Y BBOX ---
                 img_base_para_bbox = imagen_para_visor
-                
                 if video_presente and st.session_state.get("last_video_path") and "FRAME:" in raw_txt:
                     st.toast("🎞️ Buscando el fotograma exacto en el vídeo...")
                     frame_extraido, raw_txt = extraer_frame_video(st.session_state.last_video_path, raw_txt)
-                    if frame_extraido:
-                        img_base_para_bbox = anonimizar_imagen(frame_extraido, modo)
+                    if frame_extraido: img_base_para_bbox = anonimizar_imagen(frame_extraido, modo)
                 
                 if img_base_para_bbox and not sam_utilizado:
                     im_m, clean_t, det = extraer_y_dibujar_bboxes(raw_txt, img_base_para_bbox)
-                    if det:
-                        st.session_state.img_marcada = im_m
-                    elif not st.session_state.img_marcada:
-                        st.session_state.img_marcada = img_base_para_bbox
+                    if det: st.session_state.img_marcada = im_m
+                    elif not st.session_state.img_marcada: st.session_state.img_marcada = img_base_para_bbox
                     raw_txt = clean_t
 
                 st.session_state.resultado_analisis = raw_txt
