@@ -108,8 +108,11 @@ if not st.session_state.autenticado:
 #      FUNCIONES DE UTILIDAD Y BASE64
 # ==========================================
 def image_to_base64(img_pil):
+    """Convierte una imagen PIL a Base64 y la comprime para evitar colapsar OpenRouter"""
+    img_resized = img_pil.copy()
+    img_resized.thumbnail((1024, 1024))
     buffered = io.BytesIO()
-    img_pil.convert('RGB').save(buffered, format="JPEG")
+    img_resized.convert('RGB').save(buffered, format="JPEG", quality=85)
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def anonimizar_imagen(img_pil, modo):
@@ -337,6 +340,21 @@ st.title("🩺 LabMind")
 col_l, col_c, col_r = st.columns([1, 2, 1])
 
 with col_l:
+    # --- BOTONES DE CONTROL AÑADIDOS ---
+    c_btn1, c_btn2 = st.columns(2)
+    with c_btn1:
+        if st.button("🚪 Cerrar Sesión", use_container_width=True):
+            cookie_manager.delete("labmind_secret_key")
+            cookie_manager.delete("labmind_or_key")
+            st.session_state.autenticado = False
+            time.sleep(0.5)
+            st.rerun()
+    with c_btn2:
+        if st.button("🗑️ Borrar Chat", use_container_width=True):
+            st.session_state.chat_messages = []
+            st.toast("Historial de chat borrado.")
+            st.rerun()
+            
     st.subheader("⚙️ Motor IA Principal (Adjunto)")
     try:
         genai.configure(api_key=st.session_state.api_key)
@@ -367,18 +385,24 @@ with col_l:
                 response = requests.get("https://openrouter.ai/api/v1/models", timeout=5)
                 if response.status_code == 200:
                     data = response.json().get("data", [])
-                    # Filtramos SOLO los gratuitos para evitar disgustos y gastos accidentales
                     st.session_state.modelos_or = sorted([m["id"] for m in data if "free" in m["id"].lower()])
             
-            # Si por algún motivo la API de OpenRouter falla temporalmente, cargamos el modelo manualmente:
             if not st.session_state.modelos_or:
                 st.session_state.modelos_or = ["meta-llama/llama-3.2-11b-vision-instruct:free"]
             
             idx_or_defecto = 0
+            
+            # 1. Buscamos primero si hay alguno de visión
             for i, mod in enumerate(st.session_state.modelos_or):
                 if "vision" in mod.lower() and "llama" in mod.lower():
                     idx_or_defecto = i
                     break
+            else:
+                # 2. Si NO hay visión, buscamos por defecto el de 70B
+                for i, mod in enumerate(st.session_state.modelos_or):
+                    if "llama-3.3-70b-instruct:free" in mod.lower():
+                        idx_or_defecto = i
+                        break
             
             st.session_state.modelo_or = st.selectbox("Versión de Llama (OpenRouter):", st.session_state.modelos_or, index=idx_or_defecto)
             st.success("✅ Auditoría Activa (OpenRouter)")
@@ -713,6 +737,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 {html_requerido}
                 """
                 
+                # EJECUCIÓN AGENTE 1 (GEMINI)
                 res_adjunto = model.generate_content(
                     [prompt_adjunto, *con] if con else prompt_adjunto, 
                     safety_settings=MEDICAL_SAFETY_SETTINGS,
@@ -722,7 +747,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- AUDITORÍA CLÍNICA (OPENROUTER / LLAMA VISION) ---
+                # --- AUDITORÍA CLÍNICA (OPENROUTER / LLAMA VISION O TEXTO) ---
                 raw_txt = ""
                 
                 if st.session_state.get("api_key_or") and modelo_or_actual:
@@ -731,6 +756,10 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                         client = OpenAI(
                             base_url="[https://openrouter.ai/api/v1](https://openrouter.ai/api/v1)",
                             api_key=st.session_state.api_key_or,
+                            default_headers={
+                                "HTTP-Referer": "[https://enfermeroexperto.streamlit.app](https://enfermeroexperto.streamlit.app)",
+                                "X-Title": "LabMind"
+                            }
                         )
                         
                         if auditor_tiene_vision and imagen_para_visor:
@@ -775,6 +804,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                         )
                         raw_txt = chat_completion.choices[0].message.content
                     except Exception as e:
+                        st.error(f"🔍 Detalles del fallo en OpenRouter: {str(e)}")
                         print(f"Error OpenRouter: {e}")
                         st.toast("⚠️ Fallo en OpenRouter. Usando solo el borrador de Gemini.")
                         raw_txt = raw_txt_inicial
