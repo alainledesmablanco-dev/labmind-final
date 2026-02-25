@@ -365,13 +365,21 @@ with col_l:
             import groq
             client = groq.Groq(api_key=st.session_state.api_key_groq)
             if not st.session_state.modelos_groq:
+                # Obtenemos la lista actual de modelos en Groq
                 st.session_state.modelos_groq = sorted([m.id for m in client.models.list().data])
             
             idx_groq_defecto = 0
+            # Buscamos primero si hay alguno de visión
             for i, mod in enumerate(st.session_state.modelos_groq):
-                if "llama-3.2-11b-vision-preview" in mod:
+                if "vision" in mod.lower():
                     idx_groq_defecto = i
                     break
+            else:
+                # Si no hay visión, buscamos el de 70b
+                for i, mod in enumerate(st.session_state.modelos_groq):
+                    if "70b" in mod.lower():
+                        idx_groq_defecto = i
+                        break
             
             st.session_state.modelo_groq = st.selectbox("Versión de Llama (Groq):", st.session_state.modelos_groq, index=idx_groq_defecto)
             st.success("✅ Auditoría Activa")
@@ -475,6 +483,10 @@ with col_c:
                 imagen_para_visor = None
                 video_presente = False
                 
+                # --- DETECCIÓN DINÁMICA DE CAPACIDAD DE VISIÓN EN GROQ ---
+                modelo_groq_actual = st.session_state.get("modelo_groq", "")
+                auditor_tiene_vision = "vision" in modelo_groq_actual.lower() if modelo_groq_actual else False
+                
                 if modo == "📚 Agente Investigador (PubMed)":
                     q_val = locals().get('query_pubmed', '')
                     if q_val:
@@ -548,7 +560,17 @@ with col_c:
 
                 # --- INSTRUCCIONES ESPECÍFICAS Y HTML ---
                 instrucciones_especificas = ""
-                html_requerido = ""
+                html_base_modo = ""
+                
+                # CREACIÓN DEL PUENTE VISUAL (SI NO HAY VISIÓN PERO SÍ IMAGEN)
+                puente_visual_html = ""
+                if not auditor_tiene_vision and imagen_para_visor and modo not in ["🩸 Analíticas (God Mode)", "📚 Agente Investigador (PubMed)"]:
+                    puente_visual_html = """
+<details class="radiomics-box" open>
+<summary>👁️ ANÁLISIS VISUAL CRUDO (PUENTE IA)</summary>
+<p><b>[Traducción Visual Obligatoria]:</b> [Describe exhaustivamente colores, texturas, formas y asimetrías de la imagen médica. PROHIBIDO dar diagnósticos en esta sección, limítate a describir la imagen físicamente].</p>
+</details>
+"""
                 
                 if modo == "🩹 Heridas / Úlceras":
                     try:
@@ -559,7 +581,7 @@ with col_c:
                             instrucciones_especificas = "- INSTRUCCIÓN DE CURAS: Te he adjuntado una foto del 'Protocolo de San Eloy'. PRIORIDAD MÁXIMA: Si vas a recomendar un apósito, usa EXACTAMENTE los nombres de esa imagen. FLEXIBILIDAD: Si consideras que necesita algo que no está ahí, tienes libertad para añadirlo."
                     except: pass
                     
-                    html_requerido = """
+                    html_base_modo = """
 <details class="diagnosis-box" open>
 <summary>🚨 HALLAZGOS Y RAZONAMIENTO</summary>
 <p><b>[Diagnóstico]</b> [Certeza: XX%]. [Tu análisis]</p>
@@ -577,7 +599,7 @@ with col_c:
 """
                 elif modo == "🩸 Analíticas (God Mode)":
                     instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE ANALÍTICAS: Eres un experto intensivista y bioquímico clínico. 1. Busca patrones ocultos. 2. Si dispones de los datos numéricos, CALCULA OBLIGATORIAMENTE y muestra: Anion Gap, Gap Osmolar, Calcio corregido por albúmina y filtrado glomerular estimado (CKD-EPI). 3. Identifica el trastorno ácido-base primario y las compensaciones esperadas. 4. Advierte explícitamente sobre posibles errores pre-analíticos."
-                    html_requerido = """
+                    html_base_modo = """
 <details class="diagnosis-box" open>
 <summary>🩸 ANÁLISIS BIOQUÍMICO Y PATRÓN</summary>
 <p><b>[Patrón Principal Detectado]</b> [Certeza: XX%]. [Análisis detallado incluyendo cálculos obligatorios]</p>
@@ -600,7 +622,7 @@ with col_c:
 """
                 elif modo == "🧠 Medicina Interna (Holístico)":
                     instrucciones_especificas = "- INSTRUCCIÓN ULTRA GOD MODE INTERNA: Actúa como Jefe de Servicio de Medicina Interna de un hospital terciario. Tienes una visión holística. 1. SÍNTESIS: Cruza TODOS los datos. 2. NAVAJA DE OCKHAM: Busca y prioriza un diagnóstico principal y unificador. 3. DICTUM DE HICKAM: Propón un diagnóstico diferencial riguroso. 4. ESTRATIFICACIÓN VITAL: Define el nivel de gravedad."
-                    html_requerido = """
+                    html_base_modo = """
 <details class="diagnosis-box" open>
 <summary>🧠 DIAGNÓSTICO SINDRÓMICO INTEGRAL</summary>
 <p><b>[Diagnóstico Unificador Principal]</b> [Certeza: XX%]. [Síntesis holística cruzando todas las pruebas aportadas]</p>
@@ -627,7 +649,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 1. Si usas artículos con números PMID, OBLIGATORIAMENTE cítalos usando esta estructura HTML: <a href="https://pubmed.ncbi.nlm.nih.gov/AQUI_EL_NUMERO_PMID/" target="_blank">PMID: AQUI_EL_NUMERO_PMID</a>.
 2. Si los "Datos" están vacíos, busca en tu memoria interna evidencia de OTRAS fuentes (Cochrane, UpToDate, guías). Inicia la respuesta con: "⚠️ <b>Búsqueda en PubMed sin resultados. Evidencia rescatada de otras fuentes.</b>" e incluye un enlace HTML clicable a la web de la organización.
 3. Como ÚLTIMO RECURSO, inicia con: "⚠️ <b>No existe evidencia indexada clara. Respuesta basada en principios fisiopatológicos.</b>" """
-                    html_requerido = """
+                    html_base_modo = """
 <details class="pubmed-box" open>
 <summary>📚 RESPUESTA CLÍNICA Y EVIDENCIA</summary>
 <p><b>[Conclusión Directa]</b> [Certeza: XX%]. [Aplica obligatoriamente la advertencia ⚠️ si no se usó PubMed. Luego da tu respuesta clara.]</p>
@@ -644,7 +666,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 </details>
 """
                 else:
-                    html_requerido = f"""
+                    html_base_modo = f"""
 <details class="diagnosis-box" open>
 <summary>🚨 HALLAZGOS Y RAZONAMIENTO</summary>
 <p><b>[Diagnóstico]</b> [Certeza: XX%]. [Tu análisis]</p>
@@ -665,6 +687,9 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 <p>[Plan de cuidados específicos]</p>
 </details>
 """
+
+                # JUNTAMOS EL HTML FINAL
+                html_requerido = puente_visual_html + html_base_modo
 
                 # --- PROMPT AGENTE 1 (MÉDICO ADJUNTO GEMINI) ---
                 prompt_adjunto = f"""
@@ -701,70 +726,68 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- AUDITORÍA CLÍNICA MULTIMODAL CON GROQ (LLAMA VISION) ---
-                prompt_auditor = f"""
-                Eres el JEFE DE SERVICIO MÉDICO (Auditor Clínico Multimodal Estricto).
-                Un médico adjunto (IA) acaba de evaluar a un paciente generando este informe preliminar:
-
-                --- INFORME PRELIMINAR A EVALUAR ---
-                {raw_txt_inicial}
-                -------------------------------------
-
-                DATOS CLÍNICOS DISPONIBLES EN TEXTO:
-                Notas del usuario: {notas}
-                Textos extraídos (Analíticas/PubMed): {txt_docs[:10000]}
-
-                TU MISIÓN ESTRICTA PARA EVITAR ALUCINACIONES:
-                1. OBSERVA LA IMAGEN: Si te han adjuntado una imagen, obsérvala con detenimiento.
-                2. LÓGICA CLÍNICA y VISUAL: ¿El "Diagnóstico" propuesto por el adjunto coincide EXACTAMENTE con lo que tú estás viendo en la imagen y leyendo en los datos?
-                3. DETECCIÓN DE ALUCINACIÓN: Si el adjunto describe o diagnostica algo que NO está en la imagen, asume inmediatamente que el adjunto ha alucinado o se lo ha inventado.
-                4. Si detectas un error visual o clínico: CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML (como <details>, <summary>, etc.), baja drásticamente el % de Certeza y añade una nota médica al usuario advirtiendo del error.
-                5. Si el informe es lógicamente impecable y coincide con la imagen: Devuélvelo EXACTAMENTE igual, pero añade al final del título de la primera tarjeta esta etiqueta HTML: " 👁️ <b>[Auditado por Llama]</b>".
-                
-                NO añadas saludos previos ni comentarios. NO escribas ```html. Devuelve SOLO el código final estructurado en las tarjetas HTML.
-                """
-
+                # --- AUDITORÍA CLÍNICA HÍBRIDA (GROQ) ---
                 raw_txt = ""
                 
-                if st.session_state.get("api_key_groq") and st.session_state.get("modelo_groq"):
-                    # USAMOS GROQ (LLAMA 3 VISION)
-                    st.toast(f"🕵️‍♂️ IA #2 ({st.session_state.modelo_groq}): Verificación cruzada visual en curso...")
+                if st.session_state.get("api_key_groq") and modelo_groq_actual:
+                    st.toast(f"🕵️‍♂️ IA #2 ({modelo_groq_actual}): Verificación cruzada en curso...")
                     try:
                         import groq
                         client = groq.Groq(api_key=st.session_state.api_key_groq)
                         
-                        content_user = [{"type": "text", "text": prompt_auditor}]
-                        
-                        # Inyección segura de Base64 si el modelo es de Visión
-                        if imagen_para_visor and "vision" in st.session_state.modelo_groq.lower():
+                        if auditor_tiene_vision and imagen_para_visor:
+                            # MODO A: AUDITORÍA MULTIMODAL (EL AUDITOR VE LA FOTO)
+                            prompt_auditor = f"""
+                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Multimodal).
+                            Revisa este informe preliminar generado por tu adjunto:
+                            {raw_txt_inicial}
+                            
+                            TU MISIÓN ESTRICTA:
+                            Observa la imagen adjunta. ¿El "Diagnóstico" coincide EXACTAMENTE con lo que tú estás viendo?
+                            Si el adjunto describe algo que NO está en la foto (alucinación visual), CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML, baja drásticamente la Certeza y añade un aviso del error.
+                            Si es lógicamente impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al final del título de la primera tarjeta: " 👁️ <b>[Auditado por Llama Vision]</b>".
+                            No añadas saludos ni código markdown extra.
+                            """
                             base64_image = image_to_base64(imagen_para_visor)
-                            content_user.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}",
-                                }
-                            })
-                        elif imagen_para_visor:
-                            st.toast("⚠️ Modelo de texto puro seleccionado en Groq. Usando auditoría ciega.")
+                            content_user = [
+                                {"type": "text", "text": prompt_auditor},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                            ]
+                        else:
+                            # MODO B: AUDITORÍA DE TEXTO/LÓGICA (EL AUDITOR NO VE LA FOTO)
+                            prompt_auditor = f"""
+                            Eres el JEFE DE SERVICIO MÉDICO (Auditor Lógico).
+                            Revisa este informe preliminar generado por tu adjunto:
+                            {raw_txt_inicial}
+                            
+                            TU MISIÓN ESTRICTA:
+                            Tú NO puedes ver la imagen original, pero lee atentamente la sección de ANÁLISIS VISUAL CRUDO o las descripciones previas. 
+                            ¿El Diagnóstico propuesto está verdaderamente justificado por los detalles visuales y clínicos descritos?
+                            Si detectas un salto lógico o asunción peligrosa, CORRIGE el texto manteniendo EXACTAMENTE las mismas etiquetas HTML, baja la Certeza y avisa del error.
+                            Si es impecable, devuelve el HTML EXACTAMENTE igual, añadiendo al título de la primera tarjeta: " ⚕️ <b>[Auditado por Llama {modelo_groq_actual[:10]}]</b>".
+                            No añadas saludos ni código markdown extra.
+                            """
+                            # Groq text models expect text strings directly, not arrays of dicts for user content
+                            content_user = prompt_auditor
 
                         chat_completion = client.chat.completions.create(
                             messages=[
-                                {"role": "system", "content": "Eres un auditor médico experto y crítico. Tu único objetivo es proteger al paciente buscando errores en los informes preliminares."},
+                                {"role": "system", "content": "Eres un auditor médico experto y estricto. Protege al paciente buscando errores."},
                                 {"role": "user", "content": content_user}
                             ],
-                            model=st.session_state.modelo_groq,
+                            model=modelo_groq_actual,
                             temperature=0.0,
                             max_tokens=2500,
                         )
                         raw_txt = chat_completion.choices[0].message.content
                     except Exception as e:
                         print(f"Error Groq: {e}")
-                        st.toast("⚠️ Fallo en Groq. Gemini asume la auditoría final.")
-                        res_auditor = model.generate_content(prompt_auditor, generation_config={"temperature": 0.0})
-                        raw_txt = res_auditor.text
+                        st.toast("⚠️ Fallo en Groq. Usando solo el borrador de Gemini.")
+                        raw_txt = raw_txt_inicial
                 else:
-                    # GEMINI SE AUDITA A SÍ MISMO
+                    # GEMINI SE AUDITA A SÍ MISMO (MODO FALLBACK)
                     st.toast("🕵️‍♂️ IA #2 (Gemini): Auto-verificando el informe preliminar...")
+                    prompt_auditor = f"Audita y corrige este informe si encuentras errores clínicos graves, manteniendo el HTML intacto:\n\n{raw_txt_inicial}"
                     res_auditor = model.generate_content(
                         prompt_auditor, 
                         safety_settings=MEDICAL_SAFETY_SETTINGS,
