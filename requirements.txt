@@ -12,6 +12,7 @@ torchvision
 ultralytics
 plotly
 pytesseract
-groq
+requests
+openai
 
 
