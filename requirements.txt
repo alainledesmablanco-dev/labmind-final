@@ -13,6 +13,6 @@ ultralytics
 plotly
 pytesseract
 requests
-openai
+anthropic
 
 
