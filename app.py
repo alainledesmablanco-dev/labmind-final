@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 import plotly.express as px
 import base64
 import io
-from openai import OpenAI
+import requests
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="LabMind", page_icon="🧬", layout="wide")
@@ -87,7 +87,7 @@ if not st.session_state.autenticado:
     else:
         st.title("LabMind Acceso")
         k = st.text_input("API Key Google (Gemini) [Obligatorio]:", type="password")
-        k_gh = st.text_input("Token GitHub Models (Opcional para GPT-5 Gratis):", type="password")
+        k_gh = st.text_input("Token GitHub Models (Opcional para GPT-4o Gratis):", type="password")
         if st.button("Entrar", type="primary"):
             if k:
                 expires = datetime.datetime.now() + datetime.timedelta(days=30)
@@ -323,15 +323,13 @@ with col_l:
     
     if st.session_state.get("api_key_github"):
         modelos_gh = [
-            "gpt-5",
-            "gpt-5-mini",
             "gpt-4o",
             "gpt-4o-mini",
             "Llama-3.2-90B-Vision-Instruct",
             "Llama-3.2-11B-Vision-Instruct"
         ]
         st.session_state.modelo_gh = st.selectbox("Versión de Auditor:", modelos_gh, index=0)
-        st.success("✅ Auditoría Activa (GitHub Models)")
+        st.success("✅ Auditoría Activa (Llamada Directa)")
     else:
         st.info("ℹ️ Gemini se auto-auditará.")
         
@@ -411,7 +409,6 @@ with col_c:
             st.session_state.sam_metrics = {}
             st.rerun()
     
-    # --- VARIABLE PARA CAZAR EL ERROR ---
     error_del_auditor = None
 
     if btn_analizar:
@@ -658,16 +655,20 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 raw_txt_inicial = res_adjunto.text.replace("```html", "").replace("```", "").strip()
                 raw_txt_inicial = raw_txt_inicial[raw_txt_inicial.find("<details"):] if "<details" in raw_txt_inicial else raw_txt_inicial
 
-                # --- AUDITORÍA CLÍNICA (GITHUB MODELS) ---
+                # --- AUDITORÍA CLÍNICA (LLAMADA DIRECTA A GITHUB MODELS SIN LIBRERÍA OPENAI) ---
                 raw_txt = ""
                 
                 if st.session_state.get("api_key_github") and st.session_state.get("modelo_gh"):
                     st.toast(f"🕵️‍♂️ IA #2 ({st.session_state.modelo_gh}): Verificación cruzada en curso...")
                     try:
-                        client = OpenAI(
-                            base_url="[https://models.inference.ai.azure.com](https://models.inference.ai.azure.com)",
-                            api_key=st.session_state.api_key_github
-                        )
+                        # 1. Preparamos el Token asegurándonos de que no tenga espacios accidentales
+                        token_limpio = st.session_state.api_key_github.strip()
+                        
+                        # 2. Creamos la estructura del mensaje como un navegador normal
+                        headers = {
+                            "Authorization": f"Bearer {token_limpio}",
+                            "Content-Type": "application/json"
+                        }
                         
                         prompt_auditor = f"""
                         Eres el Auditor Médico. Revisa este HTML generado por un sistema previo:
@@ -689,18 +690,31 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                                 "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                             })
 
-                        chat_completion = client.chat.completions.create(
-                            model=st.session_state.modelo_gh,
-                            messages=[
+                        payload = {
+                            "model": st.session_state.modelo_gh,
+                            "messages": [
                                 {"role": "system", "content": "Eres un estricto auditor médico experto en seguridad del paciente y control de formatos HTML. Tu misión es corregir sesgos y errores visuales de otros sistemas devolviendo solo HTML puro."},
                                 {"role": "user", "content": message_content}
                             ],
-                            temperature=0.0,
-                            max_tokens=2500,
+                            "temperature": 0.0,
+                            "max_tokens": 2500
+                        }
+
+                        # 3. Lanzamos el paquete directo a Microsoft Azure sin intermediarios problemáticos
+                        respuesta_azure = requests.post(
+                            "[https://models.inference.ai.azure.com/chat/completions](https://models.inference.ai.azure.com/chat/completions)",
+                            headers=headers,
+                            json=payload,
+                            timeout=60 # Le damos 1 minuto para mirar la foto sin que Streamlit corte la conexión
                         )
-                        raw_txt = chat_completion.choices[0].message.content
+                        
+                        if respuesta_azure.status_code == 200:
+                            raw_txt = respuesta_azure.json()["choices"][0]["message"]["content"]
+                        else:
+                            raise Exception(f"Fallo del servidor (Código {respuesta_azure.status_code}): {respuesta_azure.text}")
+                            
                     except Exception as e:
-                        error_del_auditor = str(e) # ¡RESCATAMOS EL ERROR AQUÍ!
+                        error_del_auditor = str(e)
                         st.toast("⚠️ Fallo en el Auditor Externo. Usando solo el borrador de Gemini.")
                         raw_txt = raw_txt_inicial
                 else:
@@ -737,7 +751,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
 
     # --- MOSTRAR EL ERROR FUERA DE LA RUEDA PARA QUE NO SE BORRE ---
     if error_del_auditor:
-        st.error(f"🛑 Error exacto de GitHub Models:\n\n{error_del_auditor}")
+        st.error(f"🛑 Error exacto de conexión a GitHub:\n\n{error_del_auditor}")
 
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
