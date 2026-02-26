@@ -322,7 +322,6 @@ with col_l:
     st.subheader("🕵️‍♂️ Motor IA Auditor")
     
     if st.session_state.get("api_key_github"):
-        # Modelos fijos de visión en GitHub Models ordenados de mejor a peor para este caso
         modelos_gh = [
             "gpt-5",
             "gpt-5-mini",
@@ -412,6 +411,9 @@ with col_c:
             st.session_state.sam_metrics = {}
             st.rerun()
     
+    # --- VARIABLE PARA CAZAR EL ERROR ---
+    error_del_auditor = None
+
     if btn_analizar:
         st.session_state.resultado_analisis = None
         st.session_state.img_marcada = None
@@ -698,8 +700,7 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                         )
                         raw_txt = chat_completion.choices[0].message.content
                     except Exception as e:
-                        st.error(f"🔍 Detalles del fallo en GitHub Models: {str(e)}")
-                        print(f"Error GitHub Models: {e}")
+                        error_del_auditor = str(e) # ¡RESCATAMOS EL ERROR AQUÍ!
                         st.toast("⚠️ Fallo en el Auditor Externo. Usando solo el borrador de Gemini.")
                         raw_txt = raw_txt_inicial
                 else:
@@ -733,6 +734,10 @@ REGLA DE ORO DE TRANSPARENCIA Y ENLACES HTML:
                 st.session_state.pdf_bytes = create_pdf(st.session_state.resultado_analisis)
             except Exception as e: 
                 st.error(f"Error procesando el análisis: {e}")
+
+    # --- MOSTRAR EL ERROR FUERA DE LA RUEDA PARA QUE NO SE BORRE ---
+    if error_del_auditor:
+        st.error(f"🛑 Error exacto de GitHub Models:\n\n{error_del_auditor}")
 
     if st.session_state.resultado_analisis:
         st.markdown(st.session_state.resultado_analisis, unsafe_allow_html=True)
